@@ -58,6 +58,11 @@ def main() -> None:
     auto = {"enabled": config.AUTO_ENABLED, "time": config.AUTO_TIME}
     auto.update(runner.load_state().get("auto", {}))
     print(f"  自動実行: {'オン' if auto['enabled'] else 'オフ'} / 毎日 {auto['time']}")
+    weekly = {"enabled": config.WEEKLY_ENABLED, "dow": config.WEEKLY_DOW,
+              "time": config.WEEKLY_TIME}
+    weekly.update(runner.load_state().get("weekly", {}))
+    print(f"  週次レビュー: {'オン' if weekly['enabled'] else 'オフ'} / "
+          f"毎週{'月火水木金土日'[int(weekly['dow']) % 7]}曜 {weekly['time']}")
 
     print("\n── 各工程のスクリプト ──")
     for label, p in [
@@ -67,6 +72,7 @@ def main() -> None:
         ("2_台本生成 venv", config.GEN_PY),
         ("3_動画生成 venv", config.VIDEO_PY),
         ("4_投稿 venv", config.POST_PY),
+        ("5_分析 weekly_review.py", config.WEEKLY_REVIEW),
     ]:
         check(label, Path(p).exists(), f"{p} が見つからない")
 

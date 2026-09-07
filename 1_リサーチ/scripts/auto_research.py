@@ -56,6 +56,25 @@ DEFAULT_KEYWORDS = [
     "失業保険 知らないと損",
 ]
 
+KEYWORDS_JSON = HERE.parent / "検索語.json"   # 週次レビューが書き換える（無ければ既定値）
+
+
+def search_keywords() -> list[str]:
+    """今回使う検索語。`検索語.json` があればそちらを優先する。
+
+    どの語で探すかは実測で変わる（2026-09-04に手で入れ替えた）。それを毎週
+    自動でやるのが 5_分析/scripts/weekly_review.py で、書き込み先がこのJSON。
+    **コード側の DEFAULT_KEYWORDS は残す**: JSONが無い・壊れている・語が
+    ゼロになった時は既定値に戻り、リサーチが止まらないようにする。
+    """
+    try:
+        data = json.loads(KEYWORDS_JSON.read_text(encoding="utf-8"))
+        kws = [str(k).strip() for k in data.get("keywords", []) if str(k).strip()]
+    except (OSError, json.JSONDecodeError, AttributeError):
+        return list(DEFAULT_KEYWORDS)
+    return kws or list(DEFAULT_KEYWORDS)
+
+
 REUSE_BAN_DAYS = 30       # 同じ参考動画の再利用を禁止する日数
 MIN_DURATION = 45.0       # 完コピ台本に使える最低の実尺（秒）
 MAX_DURATION = 180.0      # これより長い動画は完コピに向かない
@@ -334,7 +353,8 @@ def score(c: dict) -> float:
 def main() -> None:
     ap = argparse.ArgumentParser(description="参考動画の候補を自動収集して採点する")
     ap.add_argument("-o", "--out", default=None, help="候補JSONの出力先")
-    ap.add_argument("--keywords", nargs="*", default=None, help="検索語（既定は6語）")
+    ap.add_argument("--keywords", nargs="*", default=None,
+                    help="検索語（既定は 検索語.json → DEFAULT_KEYWORDS の順）")
     ap.add_argument("--top", type=int, default=6, help="残す候補数")
     ap.add_argument("--probe-limit", type=int, default=48,
                     help="実数チェックにかける最大件数（条件通過が top×2 に達したら手前で止まる）")
@@ -352,9 +372,11 @@ def main() -> None:
     import browser_ctx  # noqa: PLC0415 - playwright入りvenvでのみ解決する
     from playwright.sync_api import sync_playwright  # noqa: PLC0415
 
-    keywords = args.keywords or DEFAULT_KEYWORDS
+    keywords = args.keywords or search_keywords()
     skip = recent_keys()
-    print(f"■ 検索語 {len(keywords)}件 / 30日以内の採用済み {len(skip)}件は除外")
+    src = "既定" if (args.keywords or not KEYWORDS_JSON.exists()) else "週次レビュー"
+    print(f"■ 検索語 {len(keywords)}件（{src}）/ 30日以内の採用済み {len(skip)}件は除外")
+    print("  " + " / ".join(keywords))
 
     found: dict[str, dict] = {}
     proc = None

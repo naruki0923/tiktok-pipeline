@@ -29,6 +29,13 @@ MENTION_USER_ID = int(os.environ.get("DISCORD_MENTION_USER_ID") or 0) or ALLOWED
 AUTO_TIME = os.environ.get("AUTO_TIME", "18:00")            # 毎日この時刻に走る
 AUTO_ENABLED = os.environ.get("AUTO_ENABLED", "1") == "1"   # 起動時の既定
 
+# --- 週次レビュー（分析 → 検索語・台本方針へ自動反映）---
+# 毎週この曜日・時刻に 5_分析/scripts/weekly_review.py を回す。曜日は 0=月 … 6=日。
+# 生成（毎日06:00）と違い**作るのは提案とレポートだけ**で、投稿には一切触らない。
+WEEKLY_ENABLED = os.environ.get("WEEKLY_ENABLED", "1") == "1"
+WEEKLY_DOW = int(os.environ.get("WEEKLY_DOW", "6"))          # 既定=日曜
+WEEKLY_TIME = os.environ.get("WEEKLY_TIME", "22:00")
+
 # --- エラー時のCodex救援 ---
 # APIは使わず、このMacでChatGPTログイン済みの codex CLIだけを使う。
 AUTO_CODEX_RESCUE = os.environ.get("AUTO_CODEX_RESCUE", "1") == "1"
@@ -63,6 +70,9 @@ OUTPUT_DIR = VIDEO_DIR / "output"                       # 完成動画
 POST_SCRIPTS = ROOT / "4_投稿" / "scripts"
 POST_PY = POST_SCRIPTS / ".venv" / "bin" / "python"     # playwright入り
 CAPTION_DIR = ROOT / "4_投稿" / "投稿予定"
+
+ANALYSIS_SCRIPTS = ROOT / "5_分析" / "scripts"
+WEEKLY_REVIEW = ANALYSIS_SCRIPTS / "weekly_review.py"   # 週次レビュー（標準ライブラリのみ）
 
 # プレビュー用の圧縮動画・ポスターの置き場
 CACHE = BOT_DIR / ".cache"
