@@ -36,6 +36,7 @@ SCRIPT_TXT_DIR = ROOT / "3_動画生成" / "音声"
 CAPTION_DIR = ROOT / "4_投稿" / "投稿予定"
 HISTORY = ROOT / "1_リサーチ" / "採用履歴.tsv"
 RESULTS = ROOT / "5_分析" / "実績.tsv"             # 角度×再生数（update_results.py が作る）
+FOCUS = GEN_DIR / "重点方針.md"                    # 週次レビューが毎週日曜に書き換える
 WIN_VIEWS = 10_000                                 # これ以上を「勝ち筋」とみなす
 JUDGE_AFTER_DAYS = 7                               # 公開これ未満は勝ち負けを判定しない
 
@@ -71,6 +72,9 @@ ok=false のときは reason に理由だけ書き、script/title/tags は空文
 
 # 当チャンネルの実績（角度 × 再生数）
 {angles}
+
+# 今週の重点方針（5_分析 の実測から自動更新）
+{focus}
 
 # 台本作成ルール（これが唯一の正。すべて守ること）
 {rules}
@@ -162,6 +166,18 @@ def covered_angles(exclude_ref: Path | None = None, limit: int = 18) -> str:
                "直後の焼き直しは避けるが、沈んだ扱いにはしないこと）")
     out += [r for _, r in fresh[:limit]] or ["- （まだ無し）"]
     return "\n".join(out)
+
+
+def focus_note() -> str:
+    """`重点方針.md` の中身。週次レビュー（weekly_review.py）が毎週日曜に書く。
+
+    実測から「今週どの入口で書くか／何を書かないか」を毎回のプロンプトに載せる。
+    人が書いた `台本作成ルール.md` とは別ファイルにしてあるのは、機械が
+    書き換えてよい場所とそうでない場所を分けるため。無ければ何も足さない。
+    """
+    if not FOCUS.exists():
+        return "（まだ無し。実績の【勝ち筋】に従うこと）"
+    return FOCUS.read_text(encoding="utf-8").strip() or "（まだ無し）"
 
 
 def next_name() -> str:
@@ -331,6 +347,7 @@ def main() -> None:
     prompt = PROMPT.format(
         today=f"{date.today():%Y年%m月%d日}",
         angles=covered_angles(exclude_ref=ref),
+        focus=focus_note(),
         rules=RULES.read_text(encoding="utf-8"),
         meta=args.meta,
         transcript=transcript[:8000],

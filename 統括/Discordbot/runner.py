@@ -13,6 +13,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -333,6 +334,51 @@ def post_youtube(name: str, slot: str = "am") -> tuple[bool, str]:
          "--caption-file", str(cap), *_slot_cli(slot, "youtube")],
         cwd=config.POST_SCRIPTS, timeout=1200,
     )
+
+
+# --- 週次レビュー -----------------------------------------------------------
+WEEKLY_TIMEOUT = 3600     # 実測の取り直し（1本20〜40秒×30本）＋LLM1回ぶん
+
+
+def _last_json(text: str) -> dict:
+    """標準出力の最後のJSON行を取る。工程スクリプトの結果はここに載る。"""
+    for line in reversed((text or "").splitlines()):
+        line = line.strip()
+        if line.startswith("{") and line.endswith("}"):
+            try:
+                return json.loads(line)
+            except json.JSONDecodeError:
+                continue
+    return {}
+
+
+def weekly_review(fetch: bool = True) -> tuple[bool, dict, str]:
+    """5_分析/scripts/weekly_review.py を回して (成否, 結果, ログ) を返す。
+
+    分析→検索語・台本方針への反映まで向こうがやる。ここは呼ぶだけ。
+    **投稿には触らない**ので、生成と違って社長の合図は要らない。
+
+    weekly_review.py は標準ライブラリだけで動くので Bot と同じ python で呼べる
+    （中で使う playwright 入りの venv は向こうが自分で呼び分ける）。
+    """
+    cmd = ["/usr/bin/caffeinate", "-i", "-m", "-s",
+           sys.executable, str(config.WEEKLY_REVIEW)]
+    if not fetch:
+        cmd.append("--no-fetch")
+    env = os.environ.copy()
+    env["PYTHONUNBUFFERED"] = "1"
+    try:
+        p = subprocess.run(cmd, cwd=str(config.ANALYSIS_SCRIPTS), capture_output=True,
+                           text=True, timeout=WEEKLY_TIMEOUT, env=env)
+    except subprocess.TimeoutExpired:
+        return False, {}, f"タイムアウト（{WEEKLY_TIMEOUT}秒）"
+    except OSError as e:
+        return False, {}, f"起動できません: {e}"
+    res = _last_json(p.stdout)
+    log = _trim_log((p.stderr or "") + (p.stdout or ""))
+    if p.returncode != 0 or not res.get("ok"):
+        return False, res, res.get("reason", "") or log
+    return True, res, log
 
 
 # --- プレビュー -------------------------------------------------------------

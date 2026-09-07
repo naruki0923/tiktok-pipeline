@@ -10,6 +10,7 @@ LINE版と違い**トンネル(cloudflared)もwebhook登録も要らない**。D
   「投稿」                   → 直近で出来た動画を TikTok/YouTube 両方に予約投稿
   「投稿 035」「035 投稿」    → 指定した回を投稿
   「毎日18時」「自動オフ」「自動」 → 自動実行の時刻設定・停止・状態
+  「分析」「毎週日曜22時」「週次オフ」 → 週次レビュー（分析→検索語・台本方針の更新）
   「ヘルプ」「状態」          → 使い方
 
 **投稿は社長が「投稿」と言った時（またはボタンを押した時）だけ実行する**。
@@ -29,7 +30,7 @@ import asyncio
 import importlib
 import re
 import traceback
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import discord
@@ -70,6 +71,11 @@ HELP = """**📱 使い方**
 ・生成がコケた時は Codex が直して**自動でもう一度作る**（最大3回）。
 　社長が `作って` と言い直さなくてOK。※**投稿だけは今までどおり合図が要る**
 
+**分析（毎週日曜22:00に勝手に走る）**
+・`分析` … 今すぐ週次レビュー。実測を取り直し、**検索語と台本の重点方針を更新**
+・`毎週日曜22時` … 曜日と時刻を変更　・`週次オフ` … 停止　・`週次` … いまの設定
+　※更新されるのは検索語と方針まで。ネタ提案は下書きで、採用/却下は社長
+
 **スレッド**
 ・動画1本ごとにスレッドが立つ（例 `08/05 #037 退職前にやるべき…`）
 ・チャンネルに残るのは見出し1行だけ。中身はスレッドを開いてね
@@ -91,6 +97,22 @@ def _save_auto(**fields) -> None:
     runner.save_state(s)
 
 
+DOW_JA = "月火水木金土日"          # datetime.weekday() の並び（0=月 … 6=日）
+
+
+def _weekly() -> dict:
+    w = {"enabled": config.WEEKLY_ENABLED, "dow": config.WEEKLY_DOW,
+         "time": config.WEEKLY_TIME, "last_fired": ""}
+    w.update(runner.load_state().get("weekly", {}))
+    return w
+
+
+def _save_weekly(**fields) -> None:
+    s = runner.load_state()
+    s.setdefault("weekly", {}).update(fields)
+    runner.save_state(s)
+
+
 def _channel() -> discord.abc.Messageable | None:
     cid = config.CHANNEL_ID or runner.load_state().get("channel_id", 0)
     return bot.get_channel(int(cid)) if cid else None
@@ -106,6 +128,13 @@ def auto_status() -> str:
     latest = runner.latest_ready() or "なし"
     return (f"⏰ 自動実行: {'🟢オン' if a['enabled'] else '⚪️オフ'} / 毎日 {a['time']}\n"
             f"🎬 直近の完成動画: {latest}")
+
+
+def weekly_status() -> str:
+    w = _weekly()
+    return (f"📊 週次レビュー: {'🟢オン' if w['enabled'] else '⚪️オフ'} / "
+            f"毎週{DOW_JA[int(w['dow']) % 7]}曜 {w['time']}\n"
+            "　→ 実測を取り直し、検索語と台本の重点方針を更新（**投稿はしない**）")
 
 
 # --- ボタン -----------------------------------------------------------------
@@ -598,16 +627,116 @@ async def do_post(ch: discord.abc.Messageable, name: str, where: str, slot: str,
         await ask_codex(ch, f"{name} の投稿処理（{where}）の想定外エラー", detail)
 
 
+# --- 週次レビュー -----------------------------------------------------------
+async def do_weekly(ch: discord.abc.Messageable, headline: str = "") -> None:
+    """先週の実測を見て、リサーチの検索語と台本の重点方針を更新する。
+
+    やるのは Check→Act のうち**機械が決めてよいところだけ**:
+      ・5_分析/実績.tsv を取り直す（＝勝ち筋/沈んだ角度の判定が最新になる）
+      ・1_リサーチ/検索語.json … 次のリサーチが探す語
+      ・2_台本生成/重点方針.md … 次の台本プロンプトに入る方針
+    ネタ提案は下書きのまま置くだけで、採用/却下は社長（メモリ act-step-human-gate）。
+    **投稿には一切触らない**ので、走っても勝手に何かが世に出ることはない。
+
+    実測の取り直しで投稿用プロファイルのChromeを開くため、生成・投稿とは
+    _busy で排他する（Chromeの取り合いで両方コケるのを避ける）。
+    """
+    if _busy.locked():
+        await ch.send("⏳ いま別の処理が走っています。終わってから `分析` と言ってね")
+        return
+    async with _busy:
+        th = await open_thread(ch, headline or "📊 週次レビューを始めます",
+                               f"{datetime.now():%m/%d} 週次レビュー")
+        await th.send("🔎 実測を取り直して分析します（10〜20分）。"
+                      "この間 投稿用のChromeが立ち上がります")
+        try:
+            ok, res, log = await asyncio.to_thread(runner.weekly_review)
+        except Exception:  # noqa: BLE001 - 週次が落ちても静かに死なせない
+            detail = traceback.format_exc()
+            await send(th, f"❌ 週次レビューで想定外のエラー\n```\n{detail[-1200:]}\n```")
+            await ask_codex(th, "週次レビュー（5_分析/scripts/weekly_review.py）", detail)
+            return
+        if not ok:
+            await send(th, f"❌ 週次レビューに失敗\n```\n{log[-1200:]}\n```")
+            await ask_codex(th, "週次レビュー（5_分析/scripts/weekly_review.py）", log)
+            return
+
+        body = ["📊 **週次レビュー完了**", ""]
+        body += [f"・{line}" for line in res.get("summary", [])] or ["・（要点なし）"]
+        if res.get("changes"):
+            body += ["", "**反映しました（次の生成から効きます）**", *res["changes"]]
+        else:
+            body += ["", "🔁 変更なし（先週の方針を続けます）"]
+        if res.get("notes"):
+            body += ["", f"📝 社長の判断待ち: {res['notes']}"]
+        body += res.get("warnings", [])
+        if res.get("proposal"):
+            body += ["", f"💡 ネタ提案の下書き: `{Path(res['proposal']).name}`"
+                         "（採用/却下は社長。使う時は `作って` の前に見てね）"]
+        await send(th, "\n".join(body))
+
+        for key in ("report", "proposal"):
+            path = Path(res.get(key) or "")
+            if path.exists() and path.stat().st_size < 7_000_000:
+                try:
+                    await th.send(file=discord.File(str(path)))
+                except discord.HTTPException as e:
+                    print(f"[weekly] {path.name} を送れません: {e}")
+
+
 # --- 自動実行 ---------------------------------------------------------------
 CATCHUP_LIMIT = 12 * 3600   # 定刻からこの時間内なら寝過ごし分を後追いで実行する
 
 
+def weekly_due(w: dict, now: datetime) -> datetime | None:
+    """直近の「その曜日のその時刻」を返す。設定が壊れていれば None。
+
+    走らせるのは常に**過去いちばん近い定刻**。こうしておくと、Macが寝ていて
+    日曜22:00を逃しても、月曜の朝に起きた時点で同じ回として追いかけられる
+    （＝週をまたいでも二重に走らない）。
+    """
+    try:
+        hh, mm = (int(x) for x in str(w["time"]).split(":"))
+        dow = int(w["dow"]) % 7
+    except (KeyError, TypeError, ValueError):
+        return None
+    due = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
+    due -= timedelta(days=(now.weekday() - dow) % 7)
+    return due - timedelta(days=7) if due > now else due
+
+
+async def weekly_tick(now: datetime) -> bool:
+    """週次レビューの定刻を過ぎていたら走らせる。走ったら True。"""
+    w = _weekly()
+    if not w["enabled"]:
+        return False
+    due = weekly_due(w, now)
+    if due is None:
+        return False
+    late = (now - due).total_seconds()
+    if late > CATCHUP_LIMIT or w["last_fired"] == due.strftime("%Y-%m-%d"):
+        return False
+    ch = _channel()
+    if not ch:
+        print("[weekly] 通知先チャンネル未登録のため発火スキップ")
+        return False
+    _save_weekly(last_fired=due.strftime("%Y-%m-%d"))
+    delay = "" if late < 120 else f"（定刻{w['time']}に寝てたので今から）"
+    await do_weekly(ch, headline=(
+        f"📊 **毎週{DOW_JA[int(w['dow']) % 7]}曜 {w['time']} 週次レビュー**{delay}"
+        " — 先週の実測を見て、リサーチと台本の方針を更新します"))
+    return True
+
+
 @tasks.loop(seconds=30)
 async def clock() -> None:
+    now = datetime.now()
+    # 週次が先。定刻がぶつかった時は分析を優先する（生成は翌朝また走る）
+    if await weekly_tick(now):
+        return
     a = _auto()
     if not a["enabled"]:
         return
-    now = datetime.now()
     if a["last_fired"] == now.strftime("%Y-%m-%d"):
         return
     try:
@@ -670,6 +799,7 @@ async def on_error(event_method: str, *args, **kwargs) -> None:
 async def on_ready() -> None:
     print(f"✔ ログイン: {bot.user}")
     print(auto_status().splitlines()[0])
+    print(weekly_status().splitlines()[0])
     await learn_owner()
     if not clock.is_running():
         clock.start()
@@ -706,6 +836,33 @@ async def on_message(msg: discord.Message) -> None:
     # 「おまかせ投稿」「自動で投稿」= TikTokの確定ボタンまで自動で押す
     auto_press = any(k in text for k in ("おまかせ", "お任せ", "自動", "全部", "代わり"))
 
+    # 週次レビューの設定（「毎週日曜22時」「週次オフ」「週次」）。
+    # 日次の分岐より前に見る。あとに置くと「毎週…22時」が日次の時刻設定に食われる。
+    if any(k in text for k in ("週次", "毎週")) and not post_kw:
+        if any(k in text for k in ("オフ", "停止", "止め", "切")):
+            _save_weekly(enabled=False)
+            await ch.send("🛑 週次レビューをオフにしました")
+            return
+        fields = {}
+        dow = re.search(r"([月火水木金土日])\s*曜", text)
+        if dow:
+            fields["dow"] = DOW_JA.index(dow.group(1))
+        at = re.search(r"(\d{1,2})\s*[:時]\s*(\d{1,2})?", text)
+        if at:
+            fields["time"] = f"{int(at.group(1)):02d}:{int(at.group(2) or 0):02d}"
+        if fields or any(k in text for k in ("オン", "開始", "スタート")):
+            _save_weekly(enabled=True, **fields)
+            await ch.send("🟢 設定しました\n" + weekly_status())
+            return
+        await ch.send(weekly_status())
+        return
+
+    # 週次レビューを今すぐ回す（定刻を待たずに分析したい時）
+    if any(k in text for k in ("分析", "レビュー")) and not post_kw:
+        await do_weekly(ch, headline="📊 **週次レビュー**（手動）"
+                                     " — 実測を見て、リサーチと台本の方針を更新します")
+        return
+
     # 自動実行（時計）の設定。「自動で投稿」を時計設定と取り違えないよう投稿系は除く
     if ("自動" in text or "毎日" in text) and not post_kw:
         if any(k in text for k in ("オフ", "停止", "止め", "切")):
@@ -728,7 +885,7 @@ async def on_message(msg: discord.Message) -> None:
         await ch.send(HELP)
         return
     if "状態" in text:
-        await ch.send(auto_status())
+        await ch.send(auto_status() + "\n" + weekly_status())
         return
 
     url = re.search(r"https?://\S*tiktok\.com/\S+", text)
