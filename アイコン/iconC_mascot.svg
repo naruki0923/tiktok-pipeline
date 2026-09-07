@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1080" width="1080" height="1080">
+  <rect width="1080" height="1080" fill="#EAF3FB"/>
+  <circle cx="540.0" cy="540.0" r="540" fill="#DCEBF8"/>
+  <!-- 体（紺のスーツ）-->
+  <path d="M 310.0 1080 Q 310.0 760 540.0 760 Q 770.0 760 770.0 1080 Z" fill="#0E2A47"/>
+  <!-- 浮き輪（体の前）-->
+  <path d="M 290.0 820 a 250 250 0 1 0 500 0 a 250 250 0 1 0 -500 0 Z M 390.0 820 a 150 150 0 1 1 300 0 a 150 150 0 1 1 -300 0 Z" fill="#FFFFFF"/>
+<path d="M 738.5 844.4 A 200.0 200.0 0 0 1 564.4 1018.5" fill="none" stroke="#FF7A29" stroke-width="100" stroke-linecap="butt"/>
+<path d="M 515.6 1018.5 A 200.0 200.0 0 0 1 341.5 844.4" fill="none" stroke="#FF7A29" stroke-width="100" stroke-linecap="butt"/>
+<path d="M 341.5 795.6 A 200.0 200.0 0 0 1 515.6 621.5" fill="none" stroke="#FF7A29" stroke-width="100" stroke-linecap="butt"/>
+<path d="M 564.4 621.5 A 200.0 200.0 0 0 1 738.5 795.6" fill="none" stroke="#FF7A29" stroke-width="100" stroke-linecap="butt"/>
+  <!-- 顔 -->
+  <circle cx="540.0" cy="470" r="210" fill="#FFE0B8"/>
+  <!-- 髪 -->
+  <path d="M 325.0 470 Q 325.0 250 540.0 250 Q 755.0 250 755.0 470 Q 755.0 360 540.0 360 Q 325.0 360 325.0 470 Z" fill="#3A2E28"/>
+  <!-- 目 -->
+  <circle cx="462.0" cy="480" r="26" fill="#2B2320"/>
+  <circle cx="618.0" cy="480" r="26" fill="#2B2320"/>
+  <!-- ほほ -->
+  <circle cx="420.0" cy="540" r="30" fill="#FFB39B" opacity="0.7"/>
+  <circle cx="660.0" cy="540" r="30" fill="#FFB39B" opacity="0.7"/>
+  <!-- 笑顔 -->
+  <path d="M 470.0 560 Q 540.0 630 610.0 560" fill="none" stroke="#2B2320" stroke-width="16" stroke-linecap="round"/>
+  <!-- ¥バッジ -->
+  <circle cx="690.0" cy="360" r="86" fill="#FF7A29"/>
+  <text x="690.0" y="398" font-family="Arial Black, Arial" font-weight="900" font-size="110" fill="#FFFFFF" text-anchor="middle">¥</text>
+</svg>

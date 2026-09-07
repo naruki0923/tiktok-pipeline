@@ -1,0 +1,12 @@
+# 認証セッション（Cookie等の機密。絶対にコミットしない）
+scripts/auth_state.json
+scripts/.chrome-profile/
+
+# venv
+scripts/.venv/
+
+# Playwrightのユーザーデータ等
+scripts/.pw-*/
+
+# OS
+.DS_Store

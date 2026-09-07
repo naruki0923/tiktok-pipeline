@@ -1,0 +1,6 @@
+# 機密・ローカル環境（絶対にコミットしない）
+client_secret.json      # YouTube OAuthクライアント（社長がDLして配置）
+youtube_token.json      # YouTube 認証トークン（youtube_auth.pyが生成）
+.chrome-profile/        # TikTokログインセッション
+.venv/
+__pycache__/

@@ -1,0 +1,514 @@
+<!DOCTYPE html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AIオフィス（ライブ）</title></head><body>
+<style>
+:root{color-scheme:light dark;}
+body{background:#241c22;}
+#t3d{font-family:"Hiragino Maru Gothic ProN","Hiragino Sans","Yu Gothic UI",sans-serif;
+  max-width:1080px;margin:0 auto;color:#f0e6d4;padding:18px 14px 40px;}
+#t3d *{box-sizing:border-box;}
+#t3d .head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:6px 2px 14px;}
+#t3d .head h1{font-size:20px;font-weight:800;margin:0;letter-spacing:.5px;}
+#t3d .head p{font-size:12.5px;color:#c9b8a0;margin:2px 0 0;}
+#t3d .stage{position:relative;width:100%;aspect-ratio:16/10.2;border-radius:16px;overflow:hidden;
+  box-shadow:0 14px 40px rgba(0,0,0,.5);cursor:grab;background:#3b2f3f;}
+#t3d .stage.drag{cursor:grabbing;}
+#t3d canvas{position:absolute;inset:0;width:100%;height:100%;display:block;}
+#t3d .vig{position:absolute;inset:0;pointer-events:none;z-index:3;
+  box-shadow:inset 0 0 130px rgba(50,25,8,.42);border-radius:16px;}
+#t3d .hud{position:absolute;z-index:4;}
+#t3d .proc{top:10px;left:50%;transform:translateX(-50%);display:flex;gap:5px;align-items:center;
+  background:rgba(22,28,38,.85);border-radius:999px;padding:6px 10px;}
+#t3d .ps{display:flex;align-items:center;gap:4px;font-size:11px;font-weight:800;color:#93a0ae;
+  padding:2px 8px;border-radius:999px;}
+#t3d .ps.on{background:#e59a2a;color:#241a08;}
+#t3d .ps.ok{color:#82d69c;}
+#t3d .pa{color:#55606c;font-size:10px;}
+#t3d .live{top:14px;right:14px;display:flex;align-items:center;gap:6px;font-size:11px;font-weight:800;
+  color:#fff;background:rgba(22,28,38,.72);border-radius:999px;padding:5px 11px;}
+#t3d .live i{width:8px;height:8px;border-radius:50%;background:#e5484d;animation:t3-blink 1.2s infinite;}
+#t3d .cam{top:44px;right:14px;font-size:10px;font-weight:700;color:#fff;background:rgba(22,28,38,.55);
+  border-radius:999px;padding:4px 10px;}
+#t3d .mon{top:52px;left:12px;width:180px;background:rgba(248,240,222,.94);border-radius:11px;
+  padding:9px 11px;box-shadow:0 6px 18px rgba(0,0,0,.28);color:#4a3a20;}
+#t3d .mon h4{margin:0 0 5px;font-size:10px;letter-spacing:1px;color:#6a5330;font-weight:800;}
+#t3d .file{font-family:ui-monospace,monospace;font-size:10.5px;padding:2px 0;opacity:0;
+  transform:translateX(6px);transition:.3s;}
+#t3d .file.show{opacity:1;transform:none;}
+#t3d .file::before{content:"📄 ";}
+#t3d .log{bottom:12px;left:12px;width:270px;background:rgba(255,250,242,.92);border-radius:11px;
+  padding:8px 11px;font-size:10.5px;line-height:1.55;box-shadow:0 4px 14px rgba(0,0,0,.2);
+  max-height:96px;overflow:hidden;}
+#t3d .log .li{color:#5a4a30;opacity:0;animation:t3-in .3s forwards;}
+#t3d .log .li b{color:#241c10;}
+#t3d .god{bottom:12px;right:12px;width:210px;background:#f4ead2;border-radius:11px;overflow:hidden;
+  border:1px solid #d8c49a;box-shadow:0 6px 18px rgba(0,0,0,.3);}
+#t3d .god h4{margin:0;background:#c2452f;color:#fff;font-size:11px;font-weight:800;padding:6px 10px;}
+#t3d .god .p{padding:7px 8px 8px;}
+#t3d .god textarea{width:100%;border:1px solid #cdb88c;border-radius:7px;padding:5px 8px;font:inherit;
+  font-size:11px;resize:none;background:#fffdf7;color:#2a2118;height:38px;}
+#t3d .god .row{display:flex;gap:6px;margin-top:6px;}
+#t3d .god button{flex:1;border:none;border-radius:7px;padding:6px;font:inherit;font-size:11px;
+  font-weight:800;cursor:pointer;background:#c2452f;color:#fff;}
+#t3d .god button.s{background:#7a5a34;}
+#t3d .toast{left:50%;top:46%;transform:translate(-50%,-50%) scale(.85);opacity:0;position:absolute;
+  background:rgba(18,24,32,.95);color:#fff;padding:12px 20px;border-radius:12px;font-size:13px;
+  font-weight:800;transition:.3s;pointer-events:none;z-index:9;box-shadow:0 12px 34px rgba(0,0,0,.5);}
+#t3d .toast.on{opacity:1;transform:translate(-50%,-50%) scale(1);}
+#t3d .deck{display:flex;gap:10px;align-items:center;margin-top:12px;flex-wrap:wrap;}
+#t3d .btn{font:inherit;font-size:12.5px;font-weight:800;border:none;border-radius:9px;
+  padding:9px 18px;cursor:pointer;background:#f0e6d4;color:#2a2118;}
+#t3d .btn.g{background:#c2452f;color:#fff;}
+#t3d .hint{font-size:11px;color:#c9b8a0;}
+#t3d .detail{margin-top:12px;font-size:12.5px;color:#e6d8c0;background:rgba(255,255,255,.06);
+  border:1px solid rgba(255,255,255,.1);border-radius:10px;padding:11px 14px;line-height:1.65;}
+#t3d .detail b{color:#fff;}
+@keyframes t3-blink{0%,100%{opacity:1}50%{opacity:.25}}
+@keyframes t3-in{to{opacity:1}}
+@media(max-width:660px){#t3d .mon{display:none}#t3d .log{width:160px}#t3d .god{width:160px}}
+</style>
+
+<div id="t3d">
+  <div class="head">
+    <div>
+      <h1>🏢 AI運用代行オフィス</h1>
+      <p><span id="livemode" style="color:#82d69c;font-weight:800">● ライブ接続中</span> — 統括/パイプライン状態.json を3秒ごとに反映（デモボタンで演出再生も可）</p>
+    </div>
+  </div>
+  <div class="stage" id="stage">
+    <canvas id="cv"></canvas>
+    <div class="vig"></div>
+    <div class="hud proc" id="proc"></div>
+    <div class="hud live"><i></i>LIVE</div>
+    <div class="hud cam" id="camL">🎥 自動カメラ：全景</div>
+    <div class="hud mon">
+      <h4>📦 成果物モニター</h4>
+      <div class="file" data-k="ref">ref_016.txt</div>
+      <div class="file" data-k="script">台本_016.txt</div>
+      <div class="file" data-k="fmt">本番_016.txt</div>
+      <div class="file" data-k="mp4">本番_016_TikTok.mp4</div>
+      <div class="file" data-k="post">予約: 明日 6:30</div>
+      <div class="file" data-k="rep">分析レポート.md</div>
+    </div>
+    <div class="hud log" id="log"></div>
+    <form class="hud god" id="god">
+      <h4>🔥 絶対神（社長）の間</h4>
+      <div class="p">
+        <textarea id="godin" placeholder="神託を入力…（例：本番_016を作れ）"></textarea>
+        <div class="row"><button type="submit">送信</button><button type="button" class="s" id="demo2">デモ</button></div>
+      </div>
+    </form>
+    <div class="toast" id="toast"></div>
+  </div>
+  <div class="deck">
+    <button class="btn g" id="play">▶ 稼働デモ</button>
+    <button class="btn" id="reset">リセット</button>
+    <span class="hint">社員クリックで詳細／ドラッグでカメラ旋回</span>
+  </div>
+  <div class="detail" id="detail">社員をクリックすると担当・役割が出ます。</div>
+</div>
+
+<script>
+(function(){
+  var stage=document.getElementById('stage'),cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+  var reduced=matchMedia('(prefers-reduced-motion:reduce)').matches;
+  var FONT='"Hiragino Maru Gothic ProN","Hiragino Sans","Yu Gothic UI",sans-serif';
+
+  function shade(hex,amt){var n=parseInt(hex.slice(1),16),
+    r=Math.max(0,Math.min(255,(n>>16)+amt)),g=Math.max(0,Math.min(255,((n>>8)&255)+amt)),
+    b=Math.max(0,Math.min(255,(n&255)+amt));return 'rgb('+r+','+g+','+b+')';}
+
+  var EMP=[
+    {id:'pm',n:'締切 守',r:'PM・司令塔',e:'🧭',c:'#E8873B',x:0,z:-195,s:1.18,say:'納期から逆算するぞ',
+     d:'社長の号令を受け各社員に仕事を振る司令塔。ディレクターのQAを通し、要所で社長に確認。手足に統括/run.py。'},
+    {id:'research',n:'目利 効子',r:'リサーチ',e:'🔎',c:'#4A7FB0',x:-330,z:-30,s:1,say:'この動画、伸びてる…！',
+     d:'黄金式(フォロワー×100<再生)で参考動画を1本採用。30日ロックは採用履歴.tsvで自動チェック。use_ref.py。'},
+    {id:'copywriter',n:'筆 走',r:'コピーライター',e:'✍️',c:'#C25B7C',x:-110,z:-30,s:1,say:'フックはここだ',
+     d:'文字起こしから台本作成ルールで台本化。です/ます統一・LINE誘導CTA。仕上げにリーガルQAを通す。'},
+    {id:'legal',n:'景表 睨子',r:'リーガル',e:'⚖️',c:'#9B5BB0',x:110,z:-30,s:1,say:'その断定、危ない',
+     d:'景表法チェック。基準は「断定回避」でなく「誤認させない」。断定的な額面訴求を事実ベースへ。'},
+    {id:'video',n:'撮田 編',r:'動画編集',e:'🎬',c:'#D9A441',x:330,z:-30,s:1,say:'テロップ焼くよ〜',
+     d:'VOICEVOX＋ffmpegで縦型9:16を生成。要VOICEVOX起動＋外付けSSD。make_video.py。'},
+    {id:'director',n:'段取 剛',r:'ディレクターQA',e:'🔍',c:'#5B8C6E',x:-225,z:135,s:1,say:'ここ、差し戻し',
+     d:'各社員の成果が要件を満たすか検査。NGは具体的に差し戻し、OKでPMへ。可能な限りコマンドで機械チェック。'},
+    {id:'poster',n:'予約 予子',r:'投稿',e:'📮',c:'#6EA3C2',x:0,z:150,s:1,say:'翌朝6:30で予約',
+     d:'CDP接続で検知回避しTikTokへ。キャプ・BGM・音量-20dB・予約まで自動。最後の確定だけ社長（半自動）。'},
+    {id:'analyst',n:'数字 見太',r:'分析',e:'📊',c:'#4FA08A',x:225,z:135,s:1,say:'維持率どうかな',
+     d:'翌日metrics_fetch→analyzeで勝ち負け判定→ネタ提案。小さな戦術改善は自動、大ピボットは社長ゲート。'}
+  ];
+  var EM={};EMP.forEach(function(e){EM[e.id]=e;});
+  var PLANTS=[[-480,-200],[480,-200],[-495,190],[495,190]];
+  var ST={act:null,done:[],pmText:'待機中',board:[['締切 守 (PM)','待機中','#8b97a4'],['— 全社員','出社済み','#8b97a4']],
+    memo:null,hits:[]};
+
+  var cam={yaw:0,pan:0,zoom:1,ty:0},userYaw=0,focus=null;
+  var W=0,H=0,CX=0,CY=0;
+  var PITCH=27*Math.PI/180,F=900,CD=1200;
+  function proj(x,y,z){
+    var yr=cam.yaw*Math.PI/180;
+    var dx=x-cam.pan;
+    var x1=dx*Math.cos(yr)-z*Math.sin(yr);
+    var z1=dx*Math.sin(yr)+z*Math.cos(yr);
+    var y2=y*Math.cos(PITCH)-z1*Math.sin(PITCH);
+    var z2=y*Math.sin(PITCH)+z1*Math.cos(PITCH);
+    var D=CD-z2,s=F/D*cam.zoom;
+    return {x:CX+x1*s,y:CY-y2*s+cam.ty,s:s,d:D};
+  }
+  function quad(p,fill,noStroke){
+    ctx.beginPath();ctx.moveTo(p[0].x,p[0].y);
+    for(var i=1;i<p.length;i++)ctx.lineTo(p[i].x,p[i].y);
+    ctx.closePath();ctx.fillStyle=fill;ctx.fill();
+    if(!noStroke){ctx.strokeStyle=fill;ctx.lineWidth=3;ctx.lineJoin='round';ctx.stroke();}
+  }
+  function rr(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);
+    ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();}
+
+  function cuboid(x,z,w,h,d,y0,col,dim,glow){
+    var w2=w/2,d2=d/2,c=[
+      proj(x-w2,y0,z-d2),proj(x+w2,y0,z-d2),proj(x+w2,y0,z+d2),proj(x-w2,y0,z+d2),
+      proj(x-w2,y0+h,z-d2),proj(x+w2,y0+h,z-d2),proj(x+w2,y0+h,z+d2),proj(x-w2,y0+h,z+d2)];
+    var dm=dim?-26:0;
+    var faces=[
+      {i:[1,0,4,5],a:-34+dm},{i:[0,3,7,4],a:-8+dm},{i:[2,1,5,6],a:-20+dm},
+      {i:[3,2,6,7],a:16+dm},{i:[4,5,6,7],a:34+dm}];
+    faces.forEach(function(f){f.z=(c[f.i[0]].d+c[f.i[1]].d+c[f.i[2]].d+c[f.i[3]].d)/4;});
+    faces.sort(function(a,b){return b.z-a.z;});
+    faces.forEach(function(f){
+      quad([c[f.i[0]],c[f.i[1]],c[f.i[2]],c[f.i[3]]],glow||shade(col,f.a));});
+    return c;
+  }
+
+  function headColor(c){var hc=shade(c,52).match(/\d+/g);
+    return '#'+((1<<24)+(+hc[0]<<16)+(+hc[1]<<8)+ +hc[2]).toString(16).slice(1);}
+
+  function drawChar(e,t){
+    var busy=ST.act===e.id,dim=!!ST.act&&!busy&&e.id!=='pm'&&ST.done.indexOf(e.id)<0;
+    var s=e.s,x=e.x,z=e.z-29*s-19*s;
+    var bob=reduced?0:(busy?Math.sin(t/70)*3.5:Math.sin(t/560+e.x)*2);
+    var c=e.c;
+    var sp=proj(x,1,z);
+    ctx.beginPath();ctx.ellipse(sp.x,sp.y,34*sp.s,11*sp.s,0,0,7);
+    ctx.fillStyle='rgba(40,20,5,.28)';ctx.fill();
+    var y=bob;
+    cuboid(x-9*s,z,10*s,7*s,13*s,y,'#5a4632',dim);
+    cuboid(x+9*s,z,10*s,7*s,13*s,y,'#5a4632',dim);
+    cuboid(x,z,34*s,27*s,23*s,y+6*s,c,dim);
+    cuboid(x-21*s,z,8*s,17*s,10*s,y+12*s,c,dim);
+    cuboid(x+21*s,z,8*s,17*s,10*s,y+12*s,c,dim);
+    var hcol=headColor(c);
+    cuboid(x,z,42*s,35*s,38*s,y+33*s,hcol,dim);
+    cuboid(x-14*s,z,10*s,12*s,10*s,y+68*s,hcol,dim);
+    cuboid(x+14*s,z,10*s,12*s,10*s,y+68*s,hcol,dim);
+    var zf=z+19*s+1;
+    var e1=proj(x-8*s,y+55*s,zf),e2=proj(x+8*s,y+55*s,zf),
+        mo=proj(x,y+46*s,zf),b1=proj(x-15*s,y+50*s,zf),b2=proj(x+15*s,y+50*s,zf);
+    ctx.fillStyle='#241c14';
+    ctx.beginPath();ctx.ellipse(e1.x,e1.y,2.6*e1.s,3.6*e1.s,0,0,7);ctx.fill();
+    ctx.beginPath();ctx.ellipse(e2.x,e2.y,2.6*e2.s,3.6*e2.s,0,0,7);ctx.fill();
+    ctx.strokeStyle='#8a4a38';ctx.lineWidth=2*mo.s;ctx.lineCap='round';
+    ctx.beginPath();ctx.arc(mo.x,mo.y,4.5*mo.s,0.15*Math.PI,0.85*Math.PI);ctx.stroke();
+    ctx.fillStyle='rgba(224,92,70,.5)';
+    ctx.beginPath();ctx.ellipse(b1.x,b1.y,3.4*b1.s,2*b1.s,0,0,7);ctx.fill();
+    ctx.beginPath();ctx.ellipse(b2.x,b2.y,3.4*b2.s,2*b2.s,0,0,7);ctx.fill();
+    var bp=proj(x,y+16*s,z+12*s+1);
+    ctx.font=Math.round(13*bp.s)+'px '+FONT;ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText(e.e,bp.x,bp.y);
+    var top=proj(x,y+92*s,z);
+    ST.hits.push({e:e,x:top.x,y:(top.y+sp.y)/2,r:60*top.s});
+    if(busy){
+      ctx.font='800 '+Math.round(12.5*top.s)+'px '+FONT;
+      var tw=ctx.measureText(e.say).width+18*top.s;
+      var bx=top.x-tw/2,by=top.y-30*top.s;
+      ctx.fillStyle='#fff';rr(bx,by,tw,22*top.s,10*top.s);ctx.fill();
+      ctx.beginPath();ctx.moveTo(top.x-5*top.s,by+22*top.s);ctx.lineTo(top.x+5*top.s,by+22*top.s);
+      ctx.lineTo(top.x,by+29*top.s);ctx.closePath();ctx.fill();
+      ctx.fillStyle='#2a2118';ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.fillText(e.say,top.x,by+11*top.s);
+    }
+  }
+
+  function drawUnit(e,t){
+    var s=e.s,dim=!!ST.act&&ST.act!==e.id&&e.id!=='pm'&&ST.done.indexOf(e.id)<0;
+    var dw=106*s,dd=56*s,dh=40*s;
+    drawChar(e,t);
+    cuboid(e.x,e.z,dw,dh,dd,0,'#b1854f',dim);
+    cuboid(e.x,e.z,dw+14*s,6*s,dd+12*s,dh,'#caa06a',dim);
+    var busy=ST.act===e.id;
+    cuboid(e.x,e.z+6*s,24*s,3*s,16*s,dh+6*s,'#454b54',dim);
+    cuboid(e.x,e.z-4*s,24*s,15*s,3*s,dh+6*s,'#454b54',dim,busy?'#ffe9a8':'#8fd8e8');
+    var p=proj(e.x,20*s,e.z+dd/2+2);
+    var pw=92*p.s,ph=32*p.s;
+    ctx.fillStyle='rgba(255,251,240,.92)';rr(p.x-pw/2,p.y-ph/2,pw,ph,6*p.s);ctx.fill();
+    var dot=busy?'#e59a2a':(ST.done.indexOf(e.id)>=0?'#4a9d5b':'#b6ac96');
+    ctx.fillStyle=dot;ctx.beginPath();ctx.arc(p.x-pw/2+9*p.s,p.y-4*p.s,3*p.s,0,7);ctx.fill();
+    ctx.fillStyle='#3a2c19';ctx.font='800 '+Math.round(10.5*p.s)+'px '+FONT;
+    ctx.textAlign='left';ctx.textBaseline='middle';
+    ctx.fillText(e.n,p.x-pw/2+15*p.s,p.y-4*p.s);
+    ctx.fillStyle='#8a7452';ctx.font='700 '+Math.round(8*p.s)+'px '+FONT;
+    ctx.textAlign='center';ctx.fillText(e.r,p.x,p.y+8.5*p.s);
+    if(ST.done.indexOf(e.id)>=0){
+      ctx.fillStyle='#4a9d5b';ctx.beginPath();ctx.arc(p.x+pw/2,p.y-ph/2,7*p.s,0,7);ctx.fill();
+      ctx.fillStyle='#fff';ctx.font='800 '+Math.round(9*p.s)+'px '+FONT;
+      ctx.textAlign='center';ctx.fillText('✓',p.x+pw/2,p.y-ph/2+0.5);}
+    if(e.id==='pm'){
+      var sg=proj(e.x,175,e.z);
+      ctx.strokeStyle='rgba(60,45,25,.6)';ctx.lineWidth=1.6*sg.s;
+      var a1=proj(e.x-30,208,e.z),a2=proj(e.x+30,208,e.z),
+          a3=proj(e.x-30,175,e.z),a4=proj(e.x+30,175,e.z);
+      ctx.beginPath();ctx.moveTo(a1.x,a1.y-40*sg.s);ctx.lineTo(a3.x,a3.y);
+      ctx.moveTo(a2.x,a2.y-40*sg.s);ctx.lineTo(a4.x,a4.y);ctx.stroke();
+      ctx.font='800 '+Math.round(11.5*sg.s)+'px '+FONT;
+      var txt='🧭 PM実況：'+ST.pmText;
+      var tw=ctx.measureText(txt).width+22*sg.s;
+      ctx.fillStyle='rgba(18,24,32,.92)';rr(sg.x-tw/2,sg.y-12*sg.s,tw,24*sg.s,9*sg.s);ctx.fill();
+      ctx.fillStyle='#ffd27a';ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.fillText(txt,sg.x,sg.y);
+    }
+  }
+  function drawPlant(p){
+    cuboid(p[0],p[1],26,20,26,0,'#a3552f');
+    cuboid(p[0],p[1],36,28,36,20,'#4f8a4a');
+    cuboid(p[0],p[1],24,18,24,48,'#5fa457');
+  }
+
+  var WX=580,WZ=-370,WH=310;
+  function draw(t){
+    var dpr=devicePixelRatio||1;
+    var w=stage.clientWidth,h=stage.clientHeight;
+    if(cv.width!==w*dpr||cv.height!==h*dpr){cv.width=w*dpr;cv.height=h*dpr;}
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    W=w;H=h;CX=W/2;CY=H*0.585;
+    ctx.clearRect(0,0,W,H);
+    var g=ctx.createLinearGradient(0,0,0,H);
+    g.addColorStop(0,'#3b2f3f');g.addColorStop(.16,'#7a5a6a');g.addColorStop(.34,'#f2b98a');
+    g.addColorStop(.5,'#e8a37f');g.addColorStop(1,'#caa06a');
+    ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+    var sun=proj(0,175,WZ);
+    var rg=ctx.createRadialGradient(sun.x,sun.y,4,sun.x,sun.y,110*sun.s);
+    rg.addColorStop(0,'#ffeecb');rg.addColorStop(.55,'rgba(255,211,144,.9)');
+    rg.addColorStop(1,'rgba(255,211,144,0)');
+    ctx.fillStyle=rg;ctx.beginPath();ctx.arc(sun.x,sun.y,110*sun.s,0,7);ctx.fill();
+    for(var i=0;i<29;i++){
+      var bx=-WX+22+i*40,bh=26+Math.abs(Math.sin(i*1.63))*70;
+      quad([proj(bx-16,0,WZ),proj(bx+16,0,WZ),proj(bx+16,bh,WZ),proj(bx-16,bh,WZ)],
+        'rgba(114,98,132,.68)',true);
+    }
+    ctx.strokeStyle='rgba(90,60,30,.5)';
+    for(var mx=-WX;mx<=WX;mx+=232){
+      var m1=proj(mx,0,WZ),m2=proj(mx,WH,WZ);
+      ctx.lineWidth=4*m1.s;ctx.beginPath();ctx.moveTo(m1.x,m1.y);ctx.lineTo(m2.x,m2.y);ctx.stroke();}
+    for(var my=100;my<WH;my+=100){
+      var n1=proj(-WX,my,WZ),n2=proj(WX,my,WZ);
+      ctx.lineWidth=3*n1.s;ctx.beginPath();ctx.moveTo(n1.x,n1.y);ctx.lineTo(n2.x,n2.y);ctx.stroke();}
+    var s1=proj(-WX,4,WZ),s2=proj(WX,4,WZ),s3=proj(WX,14,WZ),s4=proj(-WX,14,WZ);
+    quad([s1,s2,s3,s4],'#8a663a');
+    [['辞めるなら、円満に',-320],['定時で、帰ろう',320]].forEach(function(sc){
+      var tp=proj(sc[1],288,WZ+2);
+      var sw=44*tp.s,shh=168*tp.s;
+      ctx.fillStyle='#f4ead2';ctx.fillRect(tp.x-sw/2,tp.y,sw,shh);
+      ctx.fillStyle='#7a5a34';ctx.fillRect(tp.x-sw/2,tp.y-6*tp.s,sw,7*tp.s);
+      ctx.fillRect(tp.x-sw/2,tp.y+shh,sw,7*tp.s);
+      ctx.fillStyle='#5a4326';ctx.font='700 '+Math.round(12*tp.s)+'px '+FONT;
+      ctx.textAlign='center';ctx.textBaseline='top';
+      for(var ci=0;ci<sc[0].length;ci++){
+        ctx.fillText(sc[0][ci],tp.x,tp.y+8*tp.s+ci*15.5*tp.s);}
+    });
+    var bb=proj(0,282,WZ+2),bw=340*bb.s,bh2=110*bb.s;
+    ctx.fillStyle='rgba(14,20,28,.94)';rr(bb.x-bw/2,bb.y,bw,bh2,9*bb.s);ctx.fill();
+    ctx.strokeStyle='#3a4450';ctx.lineWidth=2*bb.s;rr(bb.x-bw/2,bb.y,bw,bh2,9*bb.s);ctx.stroke();
+    ctx.fillStyle='#8fa0b2';ctx.font='800 '+Math.round(9.5*bb.s)+'px '+FONT;
+    ctx.textAlign='left';ctx.textBaseline='top';
+    ctx.fillText('業務ボード',bb.x-bw/2+12*bb.s,bb.y+9*bb.s);
+    ctx.font=Math.round(10.5*bb.s)+'px ui-monospace,monospace';
+    ST.board.slice(0,4).forEach(function(r,ri){
+      ctx.fillStyle='#eef3f8';
+      ctx.fillText('▶ '+r[0],bb.x-bw/2+12*bb.s,bb.y+(28+ri*19)*bb.s);
+      ctx.fillStyle=r[2]||'#8b97a4';ctx.textAlign='right';
+      ctx.fillText(r[1],bb.x+bw/2-12*bb.s,bb.y+(28+ri*19)*bb.s);ctx.textAlign='left';});
+    quad([proj(-WX,0,WZ),proj(WX,0,WZ),proj(WX,0,370),proj(-WX,0,370)],'#cfa468',true);
+    ctx.strokeStyle='rgba(120,80,30,.25)';
+    for(var px=-WX;px<=WX;px+=58){
+      var f1=proj(px,0,WZ),f2=proj(px,0,370);
+      ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(f1.x,f1.y);ctx.lineTo(f2.x,f2.y);ctx.stroke();}
+    quad([proj(-170,1,-135),proj(170,1,-135),proj(170,1,75),proj(-170,1,75)],'#b8563e',true);
+    quad([proj(-150,1.5,-118),proj(150,1.5,-118),proj(150,1.5,58),proj(-150,1.5,58)],'#a34a34',true);
+    ST.hits=[];
+    var items=[];
+    EMP.forEach(function(e){items.push({z:e.z,f:function(){drawUnit(e,t);}});});
+    PLANTS.forEach(function(p){items.push({z:p[1],f:function(){drawPlant(p);}});});
+    items.sort(function(a,b){return a.z-b.z;});
+    items.forEach(function(it){it.f();});
+    if(ST.memo){
+      var m=ST.memo,pr=Math.min(1,(t-m.t0)/900);
+      var mx2=m.x0+(m.x1-m.x0)*pr,mz=m.z0+(m.z1-m.z0)*pr,
+          my2=95+Math.sin(pr*Math.PI)*55;
+      var mp=proj(mx2,my2,mz);
+      ctx.font=Math.round(22*mp.s)+'px '+FONT;ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.globalAlpha=pr>0.92?(1-pr)*12:1;
+      ctx.fillText('📋',mp.x,mp.y);ctx.globalAlpha=1;
+      if(pr>=1)ST.memo=null;
+    }
+  }
+
+  function lerp(a,b,k){return a+(b-a)*k;}
+  function frame(t){
+    var drift=reduced?0:Math.sin(t/5600)*6;
+    var tYaw=drift+userYaw+(focus?(-focus.x*0.02):0);
+    var tPan=focus?focus.x*0.55:0;
+    var tZm=focus?1.3:1;
+    var tTy=focus?20:0;
+    cam.yaw=lerp(cam.yaw,tYaw,.05);cam.pan=lerp(cam.pan,tPan,.05);
+    cam.zoom=lerp(cam.zoom,tZm,.05);cam.ty=lerp(cam.ty,tTy,.05);
+    draw(t);requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+
+  var dragging=false,lx=0,moved=0;
+  stage.addEventListener('pointerdown',function(e){dragging=true;lx=e.clientX;moved=0;stage.classList.add('drag');});
+  addEventListener('pointermove',function(e){if(dragging){var dx=e.clientX-lx;moved+=Math.abs(dx);
+    userYaw+=dx*0.1;userYaw=Math.max(-26,Math.min(26,userYaw));lx=e.clientX;}});
+  addEventListener('pointerup',function(){dragging=false;stage.classList.remove('drag');});
+  cv.addEventListener('click',function(ev){
+    if(moved>6)return;
+    var r=cv.getBoundingClientRect(),mx=ev.clientX-r.left,my=ev.clientY-r.top,best=null,bd=1e9;
+    ST.hits.forEach(function(h){var d=Math.hypot(h.x-mx,h.y-my);
+      if(d<h.r&&d<bd){bd=d;best=h;}});
+    if(best){var e=best.e;
+      document.getElementById('detail').innerHTML='<b>'+e.e+' '+e.n
+        +'</b> <span style="color:#c9b8a0">— '+e.r+'</span><br>'+e.d;}
+  });
+
+  var STAGES=['リサーチ','台本','動画','投稿','分析'];
+  function renderProc(a,dn){var p='';STAGES.forEach(function(s,i){
+    p+='<span class="ps'+(i===a?' on':'')+(dn.indexOf(i)>=0?' ok':'')+'">'
+      +(dn.indexOf(i)>=0?'✓':(i+1))+' '+s+'</span>';
+    if(i<4)p+='<span class="pa">▸</span>';});
+    document.getElementById('proc').innerHTML=p;}
+  renderProc(-1,[]);
+  function camLabel(t){document.getElementById('camL').textContent='🎥 自動カメラ：'+t;}
+  function logL(html){var l=document.getElementById('log');var d=document.createElement('div');
+    d.className='li';d.innerHTML=html;l.insertBefore(d,l.firstChild);
+    while(l.children.length>5)l.removeChild(l.lastChild);}
+  function file(k){var f=document.querySelector('#t3d .file[data-k="'+k+'"]');if(f)f.classList.add('show');}
+  function toast(t){var e=document.getElementById('toast');e.textContent=t;e.classList.add('on');
+    setTimeout(function(){e.classList.remove('on');},1900);}
+  function setUnits(act,done){ST.act=act;ST.done=done;
+    focus=act?EM[act]:null;camLabel(act?EM[act].n+' にズーム':'全景');}
+  function dispatch(fromId,toId){var a=EM[fromId],b=EM[toId];
+    ST.memo={x0:a.x,z0:a.z,x1:b.x,z1:b.z,t0:performance.now()};}
+  function pm(t){ST.pmText=t;}
+  function board(rows){ST.board=rows;}
+
+  var timers=[];
+  function at(t,f){timers.push(setTimeout(f,t));}
+  function reset(){
+    timers.forEach(clearTimeout);timers=[];
+    EM.director.say='ここ、差し戻し';
+    setUnits(null,[]);renderProc(-1,[]);pm('待機中');
+    board([['締切 守 (PM)','待機中','#8b97a4'],['— 全社員','出社済み','#8b97a4']]);
+    document.getElementById('log').innerHTML='';
+    document.querySelectorAll('#t3d .file').forEach(function(f){f.classList.remove('show');});
+    document.getElementById('play').disabled=false;
+  }
+  function run(){
+    demoUntil=Date.now()+21000;
+    reset();document.getElementById('play').disabled=true;
+    logL('👑 <b>社長</b>「本番_016、作れ」→ PM起動');
+    at(500,function(){pm('リサーチに指示');dispatch('pm','research');
+      board([['締切 守 (PM)','指示','#f0b35a'],['目利 効子','選定中','#f0b35a']]);
+      renderProc(0,[]);setUnits('research',[]);
+      logL('📋 PM指示: <b>research</b> 参考動画の選定');});
+    at(2300,function(){EM.director.say='選定基準を検品中…';dispatch('research','director');
+      setUnits('director',[]);pm('ディレクターQA中');
+      board([['段取 剛 (Dir)','検品中','#f0b35a'],['目利 効子','QA待ち','#8b97a4']]);
+      logL('🔍 <b>ディレクターQA</b>：黄金式・30日ロック・LINE導線を確認');});
+    at(3600,function(){file('ref');renderProc(1,[0]);dispatch('pm','copywriter');
+      setUnits('copywriter',['research']);pm('台本化へ');
+      board([['段取 剛 (Dir)','QA OK ✓','#82d69c'],['筆 走','執筆中','#f0b35a']]);
+      logL('✅ QA OK → ✍️ <b>台本化</b>');});
+    at(5400,function(){setUnits('legal',['research']);pm('リーガルQA中');
+      board([['景表 睨子','景表法チェック','#f0b35a'],['筆 走','修正待ち','#8b97a4']]);
+      logL('⚖️ <b>リーガル</b>：断定的な額面訴求を修正');});
+    at(6700,function(){EM.director.say='台本の型を検品中…';dispatch('copywriter','director');
+      setUnits('director',['research']);pm('ディレクターQA中');
+      board([['段取 剛 (Dir)','検品中','#f0b35a'],['筆 走','QA待ち','#8b97a4']]);
+      logL('🔍 <b>ディレクターQA</b>：型・CTA・行長30字を確認');});
+    at(8000,function(){file('script');file('fmt');renderProc(2,[0,1]);dispatch('pm','video');
+      setUnits('video',['research','copywriter','legal']);pm('動画生成へ');
+      board([['段取 剛 (Dir)','QA OK ✓','#82d69c'],['撮田 編','動画生成中','#f0b35a']]);
+      logL('✅ QA OK → 🎬 <b>動画生成</b>（VOICEVOX＋ffmpeg）');});
+    at(10000,function(){EM.director.say='9:16と尺を検品中…';dispatch('video','director');
+      setUnits('director',['research','copywriter','legal']);pm('ディレクターQA中');
+      board([['段取 剛 (Dir)','検品中','#f0b35a'],['撮田 編','QA待ち','#8b97a4']]);
+      logL('🔍 <b>ディレクターQA</b>：9:16・尺・テロップ伏せ字を確認');});
+    at(11300,function(){file('mp4');renderProc(3,[0,1,2]);dispatch('pm','poster');
+      setUnits('poster',['research','copywriter','legal','video']);pm('投稿設定へ');
+      board([['段取 剛 (Dir)','QA OK ✓','#82d69c'],['予約 予子','投稿設定中','#f0b35a']]);
+      logL('✅ QA OK → 📮 <b>投稿設定</b>（キャプ・BGM・翌朝6:30）');});
+    at(13100,function(){EM.director.say='キャプとCTAを検品中…';dispatch('poster','director');
+      setUnits('director',['research','copywriter','legal','video']);pm('ディレクターQA中');
+      board([['段取 剛 (Dir)','検品中','#f0b35a'],['予約 予子','QA待ち','#8b97a4']]);
+      logL('🔍 <b>ディレクターQA</b>：precheck（誇大表現・キャプ長・CTA）');});
+    at(14400,function(){toast('🙋 社長の承認待ち：投稿を確定してください');
+      pm('社長ゲート：確定待ち');
+      board([['段取 剛 (Dir)','QA OK ✓','#82d69c'],['社長','承認待ち 🙋','#f0b35a']]);
+      logL('✅ QA OK → 🙋 <b>社長ゲート</b>：最後の【投稿予約する】は社長');});
+    at(16000,function(){file('post');renderProc(4,[0,1,2,3]);dispatch('pm','analyst');
+      setUnits('analyst',['research','copywriter','legal','video','poster']);pm('翌日、分析へ');
+      board([['数字 見太','指標分析中','#f0b35a'],['維持率','判定中','#f0b35a']]);
+      logL('📊 <b>分析</b>：翌日、指標取得→勝ち負け判定');});
+    at(17800,function(){file('rep');renderProc(-1,[0,1,2,3,4]);
+      setUnits(null,['research','copywriter','legal','video','poster','analyst','director']);
+      pm('1本 完了 🎉');
+      board([['締切 守 (PM)','待機中','#8b97a4'],['本日の成果','1本 公開予約','#82d69c']]);
+      logL('✅ 完了。ディレクターQA 4回・社長の出番は承認2回だけ。');
+      document.getElementById('play').disabled=false;});
+  }
+  document.getElementById('play').onclick=run;
+  document.getElementById('demo2').onclick=run;
+  document.getElementById('reset').onclick=reset;
+
+  document.getElementById('god').addEventListener('submit',function(ev){
+    ev.preventDefault();
+    var v=document.getElementById('godin').value.trim();
+    if(!v){toast('神託を入力してください');return;}
+    if(typeof sendPrompt==='function'){
+      toast('📡 PMへ送信しました');
+      logL('👑 <b>社長の神託</b>：'+v.replace(/</g,'&lt;'));
+      sendPrompt('【社長の神託（3Dオフィスより）】pm エージェントで対応して: '+v);
+    }else{
+      toast('ここからは送れません。Claude Codeのチャットで指示してください');
+      logL('👑 <b>社長の神託</b>（展示用）：'+v.replace(/</g,'&lt;'));
+    }
+    document.getElementById('godin').value='';
+  });
+
+
+  /* ---------- LIVE mode: real pipeline state ---------- */
+  var demoUntil=0;
+  var MAP={research:'research',script:'copywriter',video:'video',post:'poster',analyze:'analyst'};
+  function applyState(s){
+    if(Date.now()<demoUntil)return;
+    var lm=document.getElementById('livemode');
+    if(lm)lm.textContent='● ライブ接続中（本番_'+s.video+' / '+s.ts+'）';
+    var doneStages=[],doneIds=[];
+    if(s.idx>=0){for(var i=0;i<Math.min(s.idx,5);i++){doneStages.push(i);
+      var k=['research','script','video','post','analyze'][i];
+      doneIds.push(MAP[k]);if(k==='script')doneIds.push('legal');}}
+    if(s.stage==='done'){doneStages=[0,1,2,3,4];
+      doneIds=['research','copywriter','legal','video','poster','analyst'];}
+    renderProc(s.idx>=0&&s.idx<5?s.idx:-1,doneStages);
+    setUnits(s.idx>=0&&s.idx<5?MAP[s.stage]:null,doneIds);
+    pm(s.pm||'待機中');
+    if(s.board)board(s.board);
+    if(s.files)Object.keys(s.files).forEach(function(k){
+      var f=document.querySelector('#t3d .file[data-k="'+k+'"]');
+      if(f)f.classList.toggle('show',!!s.files[k]);});
+  }
+  function poll(){
+    fetch('/state').then(function(r){return r.json();}).then(applyState)
+      .catch(function(){var lm=document.getElementById('livemode');
+        if(lm){lm.textContent='● サーバー未接続（デモのみ）';lm.style.color='#e59a2a';}});
+  }
+  poll();setInterval(poll,3000);
+})();
+</script>
+</body></html>

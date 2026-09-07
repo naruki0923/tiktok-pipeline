@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1080" width="1080" height="1080">
+  <rect width="1080" height="1080" fill="#0E2A47"/>
+  <circle cx="540.0" cy="570.0" r="480" fill="#12365C"/>
+  <!-- 上部ミニ浮き輪 -->
+  <g transform="translate(0,-40)">
+    <path d="M 390.0 300 a 150 150 0 1 0 300 0 a 150 150 0 1 0 -300 0 Z M 444.0 300 a 96 96 0 1 1 192 0 a 96 96 0 1 1 -192 0 Z" fill="#FFFFFF"/>
+<path d="M 662.1 315.0 A 123.0 123.0 0 0 1 555.0 422.1" fill="none" stroke="#FF7A29" stroke-width="54" stroke-linecap="butt"/>
+<path d="M 525.0 422.1 A 123.0 123.0 0 0 1 417.9 315.0" fill="none" stroke="#FF7A29" stroke-width="54" stroke-linecap="butt"/>
+<path d="M 417.9 285.0 A 123.0 123.0 0 0 1 525.0 177.9" fill="none" stroke="#FF7A29" stroke-width="54" stroke-linecap="butt"/>
+<path d="M 555.0 177.9 A 123.0 123.0 0 0 1 662.1 285.0" fill="none" stroke="#FF7A29" stroke-width="54" stroke-linecap="butt"/>
+  </g>
+  <text x="540.0" y="620" font-family="'Hiragino Sans','Yu Gothic',sans-serif" font-weight="700"
+        font-size="150" fill="#F4F7FB" text-anchor="middle" letter-spacing="14">退職</text>
+  <text x="540.0" y="800" font-family="'Hiragino Sans','Yu Gothic',sans-serif" font-weight="900"
+        font-size="190" fill="#FF7A29" text-anchor="middle" letter-spacing="4">レスキュー</text>
+</svg>

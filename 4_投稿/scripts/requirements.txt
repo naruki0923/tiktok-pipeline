@@ -1,0 +1,5 @@
+playwright==1.61.0
+# YouTube Data API v3（公式・youtube_upload.py / youtube_auth.py）
+google-api-python-client
+google-auth-oauthlib
+google-auth-httplib2

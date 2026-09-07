@@ -1,0 +1,15 @@
+name = "taisyoku-link"
+main = "worker.js"
+compatibility_date = "2026-01-01"
+workers_dev = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "taisyoku-clicks"
+database_id = "PLACEHOLDER"   # deploy.sh が自動で埋める
+
+[vars]
+# プロフからの最終遷移先（＝アフィリ先のLINE直リンク）。変わったらここを直す。
+LINE_URL = "https://liff.line.me/2008347473-mj1xWGK4/landing?follow=%40hpa9398v&lp=WrALuC&liff_id=2008347473-mj1xWGK4"
+# /stats を見るための簡易パスワード。誰かに知られたら変える。
+STATS_KEY = "cRj5ShK8FVtc"

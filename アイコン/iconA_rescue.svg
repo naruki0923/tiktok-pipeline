@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1080" width="1080" height="1080">
+  <rect width="1080" height="1080" fill="#0E2A47"/>
+  <!-- 下部にほんのり明色の帯（安心感） -->
+  <circle cx="540.0" cy="580.0" r="470" fill="#12365C"/>
+  <path d="M 168.0 540.0 a 372 372 0 1 0 744 0 a 372 372 0 1 0 -744 0 Z M 290.0 540.0 a 250 250 0 1 1 500 0 a 250 250 0 1 1 -500 0 Z" fill="#FFFFFF"/>
+<path d="M 848.7 577.9 A 311.0 311.0 0 0 1 577.9 848.7" fill="none" stroke="#FF7A29" stroke-width="122" stroke-linecap="butt"/>
+<path d="M 502.1 848.7 A 311.0 311.0 0 0 1 231.3 577.9" fill="none" stroke="#FF7A29" stroke-width="122" stroke-linecap="butt"/>
+<path d="M 231.3 502.1 A 311.0 311.0 0 0 1 502.1 231.3" fill="none" stroke="#FF7A29" stroke-width="122" stroke-linecap="butt"/>
+<path d="M 577.9 231.3 A 311.0 311.0 0 0 1 848.7 502.1" fill="none" stroke="#FF7A29" stroke-width="122" stroke-linecap="butt"/>
+  <!-- 浮き輪の内外エッジに細いネイビー線でメリハリ -->
+  <circle cx="540.0" cy="540.0" r="372" fill="none" stroke="#0E2A47" stroke-width="6" opacity="0.25"/>
+  <circle cx="540.0" cy="540.0" r="250" fill="none" stroke="#0E2A47" stroke-width="6" opacity="0.25"/>
+  <!-- 中央の¥ -->
+  <text x="540.0" y="658.0" font-family="Arial Black, Arial, sans-serif" font-weight="900"
+        font-size="330" fill="#FFFFFF" text-anchor="middle">¥</text>
+</svg>

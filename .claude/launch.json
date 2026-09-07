@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "ai-office",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["統括/ダッシュボード/server.py"],
+      "port": 8756
+    }
+  ]
+}
