@@ -42,16 +42,59 @@ cp .env.example .env
 ```
 `DISCORD_BOT_TOKEN` と `DISCORD_CHANNEL_ID` を記入する。
 
-### 3. 動かす
+### 3. 常駐させる（初回に1回だけ）
 ```bash
 cd 統括/Discordbot
 ./.venv/bin/python selftest.py   # 準備できてない項目を先に洗い出す
-./run.sh                          # 起動（このまま開けっぱなしにしておく）
-./stop.sh                         # 止める
+./install_agent.sh                # macOSの launchd に登録して起動する
+./install_agent.sh status         # いま動いているか見る
+```
+
+**手で `./run.sh` して開けっぱなしにする運用はやめた。** ターミナルを閉じた・何かの
+拍子に落ちた、で止まったままになり、2026-09-09の朝は6:00の自動生成が丸ごと飛んだ
+（issue #3）。VOICEVOXもSSDも認証も全部生きていて、**Botが起動していなかっただけ**で
+1日分の打席を落とした。落ちても気づけないのが一番まずい。
+
+`install_agent.sh` は `~/Library/LaunchAgents/com.taisyoku.discordbot.plist` を書いて
+`launchctl` に預ける。以後は **落ちても30秒で勝手に上がり、Macを再起動しても自分で戻る**。
+定刻を寝過ごしても、**12時間以内なら起き上がった時点で追いかけて実行する**
+（`bot.CATCHUP_LIMIT`）ので、朝落ちていて昼に復帰してもその日の1本は作られる。
+
+#### ⚠ 先に `/bin/bash` へフルディスクアクセスを与える（1回だけ・社長の操作）
+
+このプロジェクトは `~/Documents` の下にある。ターミナルから手で動かす分には通るが、
+**launchd から起動したプロセスは `~/Documents` を一切触れない**（macOSのTCC）。
+確認画面も出ず `Operation not permitted` で即死するだけなので、気づきにくい。
+
+> システム設定 → プライバシーとセキュリティ → フルディスクアクセス
+> → 「+」→ Cmd+Shift+G で `/bin/bash` を指定して追加 → スイッチをオン
+
+そのあと `./install_agent.sh` を実行する。許可が無いままだと、スクリプトが
+それを検知して登録を巻き戻し、上の手順を出して終わる（「登録できました」と言いながら
+一度も起動していない、という一番困る状態を作らないため）。
+
+plist の中身で効いているのは3つ:
+
+- **`/bin/bash` 経由で `run.sh` を起動する** — フルディスクアクセスは「実行される
+  バイナリ」に与えるもので、`~/Documents` の中のスクリプトはそもそも exec できない。
+- **PATH を明示的に入れる** — launchd が渡す PATH は `/usr/bin:/bin:/usr/sbin:/sbin`
+  だけ。ffmpeg も claude CLI も Homebrew 側に居るので、そのままだと
+  「Botは起動するのに動画生成だけ落ちる」という分かりにくい壊れ方をする。
+- **ログは `~/Library/Logs/discordbot.log`** — 出力先を `bot.log`（Documents配下）に
+  すると、launchd がそのファイルを開けずに `EX_CONFIG` で即死する。
+
+一時的に止める・外すとき:
+```bash
+./install_agent.sh off            # 常駐を外す（Botも止まる）
+./run.sh                          # 常駐させずに手で起動（デバッグ時）
+./stop.sh                         # 手起動を止める
 ```
 
 `run.sh` は `.bot.pid` で**二重起動を防ぐ**。Botが2つ動くと1つのメッセージに2回返事をし、
 18:00の自動実行も同時に2本走ってしまうため（実際に3つ起動して事故りかけた）。
+PIDが生きているだけでなく**中身が本当にこのBotか**まで見る。`exec` でシェルごと
+置き換わる関係で死んだPIDが `.bot.pid` に残り、それが別プロセスに再利用されると
+「起動中」と誤判定して launchd が30秒ごとに空振りし続けるため。
 
 前提: **VOICEVOX.app 起動中／外付けSSD「Extreme SSD」接続**（動画生成の依存）。
 TikTok・YouTubeの認証は `4_投稿/scripts` の `login.py` / `youtube_auth.py` を各1回。
@@ -150,7 +193,8 @@ Discordに「⚠ <bot名> は時間内に応答しませんでした」と出る
 | `pipeline.py` | リサーチ→文字起こし→台本→動画 の通し。候補を上から順に試す |
 | `runner.py` | 既存スクリプトを subprocess で呼ぶラッパ。プレビュー圧縮もここ |
 | `config.py` | .env と各工程のパス |
-| `selftest.py` | 起動前の自己診断 |
+| `selftest.py` | 起動前の自己診断。常駐登録の有無とBotの生死も見る |
+| `install_agent.sh` | launchd に常駐登録する／外す／状態を見る |
 | `state.json` | 自動実行の状態・各回の `title_lines`（gitignore） |
 | `codex_rescue.py` | 工程エラー時にCodex CLIを起動し、原因調査・修正・確認を行う |
 
@@ -193,6 +237,7 @@ Discordに「⚠ <bot名> は時間内に応答しませんでした」と出る
 | 症状 | 対処 |
 |---|---|
 | Botが反応しない | MESSAGE CONTENT INTENT がONか。`DISCORD_CHANNEL_ID` が合っているか |
+| 朝に何も届かない | `./install_agent.sh status` で生死を見る。🔴なら `./install_agent.sh` で入れ直す。原因は `bot.log` の末尾 |
 | 「候補がゼロ」 | TikTokに一時的にブロックされている。時間を空けるか、URLを直接貼る |
 | 動画生成で失敗 | VOICEVOX.app が起動しているか、外付けSSDが繋がっているか |
 | 台本が長い/短い | `2_台本生成/台本作成ルール.md` を直す（プロンプトはこれを丸ごと読んでいる） |

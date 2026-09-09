@@ -7,9 +7,16 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 PIDFILE=".bot.pid"
-if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
-  echo "⚠ 既に起動中です (PID $(cat "$PIDFILE"))。止めるなら ./stop.sh" >&2
-  exit 1
+# PIDが生きているだけでは足りない。exec でこのシェルごと置き換わるので trap は走らず、
+# 落ちた時は死んだPIDが .bot.pid に残る。そのPIDが別のプロセスに再利用されると
+# 「起動中」と誤判定して二度と上がってこない（launchd の KeepAlive が30秒ごとに
+# 叩き続けるだけになる）。中身が本当にこのBotかどうかまで見る。
+if [ -f "$PIDFILE" ]; then
+  OLD="$(cat "$PIDFILE")"
+  if kill -0 "$OLD" 2>/dev/null && ps -p "$OLD" -o command= 2>/dev/null | grep -q "bot\.py"; then
+    echo "⚠ 既に起動中です (PID $OLD)。止めるなら ./stop.sh" >&2
+    exit 1
+  fi
 fi
 echo $$ > "$PIDFILE"
 trap 'rm -f "$PIDFILE"' EXIT
