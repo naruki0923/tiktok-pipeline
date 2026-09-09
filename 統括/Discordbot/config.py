@@ -70,6 +70,7 @@ OUTPUT_DIR = VIDEO_DIR / "output"                       # 完成動画
 POST_SCRIPTS = ROOT / "4_投稿" / "scripts"
 POST_PY = POST_SCRIPTS / ".venv" / "bin" / "python"     # playwright入り
 CAPTION_DIR = ROOT / "4_投稿" / "投稿予定"
+POST_LOG = ROOT / "4_投稿" / "ログ" / "post_log.csv"    # 5_分析 がキャプションで回を突合する
 
 ANALYSIS_SCRIPTS = ROOT / "5_分析" / "scripts"
 WEEKLY_REVIEW = ANALYSIS_SCRIPTS / "weekly_review.py"   # 週次レビュー（標準ライブラリのみ）

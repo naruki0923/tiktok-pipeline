@@ -6,9 +6,13 @@ Bot はここ経由でしか各工程を触らない。工程スクリプト自�
 LINEbot/runner.py からの変更点は2つ:
   ・make_video に **--title-lines を必ず渡す**（LINE版はこれが抜けていてフックがバラけた）
   ・TikTok投稿のキャプションに **本番_NNN_TikTok.txt**（短い形式）を優先して使う
+
+TikTokは2026-09-09から手動投稿。Botの仕事は「貼る投稿文を渡す」ことと、
+5_分析 が回を突合できるよう post_log.csv に行を残すことまで。
 """
 from __future__ import annotations
 
+import csv
 import json
 import os
 import re
@@ -133,6 +137,54 @@ def caption_txt(name: str, platform: str = "youtube") -> Path:
         if tk.exists():
             return tk
     return config.CAPTION_DIR / f"{name}.txt"
+
+
+def tiktok_caption(name: str) -> str:
+    """TikTokの投稿欄にそのまま貼る1行。無ければ空文字。
+
+    TikTokは手動投稿にしたので（2026-09-09 社長判断）、Botの仕事は
+    「貼る文をそのまま渡す」ことになった。Discordのコードブロックに入れて
+    余計なものが混ざらないようにするため、改行は潰して1行で返す。
+    """
+    p = caption_txt(name, "tiktok")
+    if not p.exists():
+        return ""
+    return " ".join(p.read_text(encoding="utf-8").split())
+
+
+# 手動投稿ぶんの post_log 行。post_tiktok.py の CONFIRMED_STATUSES とは
+# わざと重ねない（あとで `おまかせ投稿` に切り替えた時、重複投稿防止に
+# 引っかかって投稿できなくならないように）。
+MANUAL_STATUS = "manual"
+
+
+def log_manual_tiktok(name: str, caption: str) -> bool:
+    """TikTokの投稿文を社長に渡したことを post_log.csv に残す。
+
+    手動投稿にすると post_tiktok.py が走らないので、放っておくとこのログが
+    途切れる。5_分析 は post_log の**キャプション→本番_NNN の対応**を使って
+    TikTok Studioの実測を回に紐づけているので（`update_results.caption_index`）、
+    途切れると新しい回が 実績.tsv に載らず、週次レビューと write_script.py の
+    勝ち筋判定が新しいデータを見なくなる。ここが繋がっていないと、
+    2026-09-04に直した「重複判定が勝ち筋を弾く」問題がそのまま再発する。
+
+    実際に投稿したかどうかは分からないので status は `manual`（＝渡しただけ）。
+    実測そのものはTikTok Studio側から取るので、出さなかった回の行が残っていても
+    突合表に載らないだけで害は無い。
+    """
+    row = [datetime.now().isoformat(timespec="seconds"),
+           f"{name}_TikTok.mp4", MANUAL_STATUS, "", caption.replace("\n", " ")]
+    try:
+        config.POST_LOG.parent.mkdir(parents=True, exist_ok=True)
+        new_file = not config.POST_LOG.exists()
+        with config.POST_LOG.open("a", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            if new_file:
+                w.writerow(["datetime", "video", "status", "url", "caption"])
+            w.writerow(row)
+        return True
+    except OSError:
+        return False   # ログが書けないだけで投稿文の受け渡しは止めない
 
 
 # --- 状態（title_lines 等の持ち回り） --------------------------------------
