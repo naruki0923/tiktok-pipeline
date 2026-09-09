@@ -7,7 +7,7 @@ LINE版と違い**トンネル(cloudflared)もwebhook登録も要らない**。D
   「作って」                 → リサーチから全自動で1本作る（18:00の自動実行と同じ）
   「035 作って」             → 台本 本番_035.txt から動画だけ作る
   TikTokのURLを貼る          → その動画を参考に台本化→動画生成
-  「投稿」                   → 直近で出来た動画を TikTok/YouTube 両方に予約投稿
+  「投稿」                   → YouTubeを予約投稿し、TikTokは貼る投稿文を出す
   「投稿 035」「035 投稿」    → 指定した回を投稿
   「毎日18時」「自動オフ」「自動」 → 自動実行の時刻設定・停止・状態
   「分析」「毎週日曜22時」「週次オフ」 → 週次レビュー（分析→検索語・台本方針の更新）
@@ -61,9 +61,9 @@ HELP = """**📱 使い方**
 　※直せるのは台本と動画。仕組み自体の不具合はClaudeに言ってね
 
 **出す**（※ここだけは社長の合図が要る）
-・`投稿` … 直近の動画を TikTok と YouTube に予約（**TikTok 翌朝8:30／YouTube 翌朝6:30**）
-　→ **TikTokの【投稿予約する】はChromeで社長が押す**（YouTubeは自動）
-・`おまかせ投稿` … Macの前に居られない時。**TikTokの確定ボタンまで自動で押す**
+・`投稿` … **YouTubeは翌朝6:30に予約**／**TikTokは投稿文を出すだけ**
+　→ TikTokは社長がアプリで手動投稿。出てきた投稿文をコピーして貼るだけ（目安 翌朝8:30）
+・`おまかせ投稿` … TikTokもブラウザ自動化で確定まで押す（Macの前に居られない時用）
 ・`投稿 035` … 回を指定　・`夜 投稿` … 翌朝でなく次の18:30に予約
 
 **自動実行**
@@ -138,16 +138,16 @@ def weekly_status() -> str:
 
 
 # --- ボタン -----------------------------------------------------------------
-BTN_LABEL = {("tiktok", False): "TikTok(手押し)", ("youtube", False): "YouTube",
-             ("both", False): "両方(手押し)", ("both", True): "おまかせ"}
+BTN_LABEL = {("tiktok", False): "TikTok文", ("youtube", False): "YouTube",
+             ("both", False): "YouTube＋TikTok文", ("both", True): "おまかせ"}
 
 
 class PostButton(discord.ui.DynamicItem[discord.ui.Button],
                  template=r"post:(?P<where>\w+):(?P<slot>\w+):(?P<auto>[01]):(?P<name>.+)"):
     """押した瞬間が承認ゲート。where=tiktok/youtube/both, slot=am/pm。
 
-    auto=False … TikTokの【投稿予約する】は社長がChromeで押す（既定の運用）
-    auto=True  … そこも自動で押す（Macの前に居られない時用）
+    auto=False … TikTokは触らず投稿文だけ出す（既定の運用）。YouTubeは予約する
+    auto=True  … TikTokもブラウザ自動化で確定まで押す（Macの前に居られない時用）
 
     **DynamicItem にしてあるのはBotを再起動してもボタンを生かすため**。
     ふつうの View はBotのメモリ上にしか無いので、再起動すると過去のプレビューの
@@ -171,7 +171,7 @@ class PostButton(discord.ui.DynamicItem[discord.ui.Button],
         return cls(match["name"], match["where"], match["slot"], match["auto"] == "1")
 
     async def callback(self, interaction: discord.Interaction) -> None:
-        mode = "おまかせ" if self.auto else "手押し"
+        mode = "おまかせ" if self.auto else "TikTokは手動"
         await interaction.response.send_message(
             f"📤 {self.vname} → {self.where}"
             f"（{runner.slot_label(self.slot, self.where)}・{mode}）")
@@ -186,7 +186,8 @@ bot.add_dynamic_items(PostButton)
 def post_view(name: str) -> discord.ui.View:
     """上段＝翌朝（TikTok 8:30/YouTube 6:30） / 下段＝夜18:30。
 
-    赤いボタンだけTikTokの確定まで自動で押す。実際の時刻は runner.SLOTS が正。
+    青いボタンはTikTokに触らず投稿文を出すだけ。赤（おまかせ）だけが
+    ブラウザ自動化で確定まで押す。実際の時刻は runner.SLOTS が正。
     """
     v = discord.ui.View(timeout=None)
     for row, slot in ((0, "am"), (1, "pm")):
@@ -465,8 +466,8 @@ async def send_preview(ch: discord.abc.Messageable, name: str, head: str,
     hook = "／".join(runner.hook_block(name))
     body = (f"{mention() if ping else ''}{head}"
             f"\n🔖 タイトル（{runner.title_lines_for(name)}行）: {hook}"
-            f"\n`投稿` → TikTokの確定は社長が手押し／`おまかせ投稿` → 確定まで自動。"
-            "\n（下のボタンでも同じことができます。赤＝おまかせ）")
+            f"\n`投稿` → YouTubeは予約、TikTokは**貼る投稿文が出る**（手動投稿）。"
+            "\n（下のボタンでも同じことができます。赤＝TikTokもおまかせ）")
     # タイトルカードの静止画は**必ず**付ける。1枚見れば崩れが分かるので、
     # 動画を再生しなくても確認できる（タイトルが一番壊れやすいため）。
     files = []
@@ -571,7 +572,11 @@ async def do_make(ch: discord.abc.Messageable, mode: str, arg: str = "",
 
 async def _do_post_inner(ch: discord.abc.Messageable, name: str, where: str, slot: str,
                          auto: bool = False) -> None:
-    """auto=False なら TikTokの確定ボタンは社長がChromeで押す（既定）。"""
+    """既定（auto=False）は **YouTubeだけ予約し、TikTokは投稿文を出すだけ**。
+
+    TikTokは手動投稿に切り替えた（2026-09-09 社長判断）。`おまかせ投稿`
+    （auto=True）と言われた時だけ、従来どおりブラウザ自動化で確定まで押す。
+    """
     if _busy.locked():
         await ch.send("⏳ いま別の処理が走っています。終わるまで待ってね")
         return
@@ -580,11 +585,12 @@ async def _do_post_inner(ch: discord.abc.Messageable, name: str, where: str, slo
         tk_when, yt_when = runner.slot_label(slot, "tiktok"), runner.slot_label(slot, "youtube")
         out, needs_hand, errors = [], False, []
 
-        if where in ("tiktok", "both"):
-            if not auto:
-                await ch.send(f"🖥 TikTokの設定中（{tk_when}）…"
-                              "終わったらChromeで【投稿予約する】を押してね")
-            status, log = await asyncio.to_thread(runner.post_tiktok, name, auto, slot)
+        # TikTokは既定で手動投稿（2026-09-09 社長判断）。Botはブラウザを触らず、
+        # 貼る文だけ渡す。ブラウザ自動化を使うのは `おまかせ投稿`（auto=True）の時だけ。
+        tiktok_manual = where in ("tiktok", "both") and not auto
+
+        if where in ("tiktok", "both") and auto:
+            status, log = await asyncio.to_thread(runner.post_tiktok, name, True, slot)
             if status == "confirmed":
                 out.append(f"✅ TikTok: 予約完了（{tk_when}）")
             elif status == "awaiting":
@@ -605,13 +611,32 @@ async def _do_post_inner(ch: discord.abc.Messageable, name: str, where: str, slo
             if not ok:
                 errors.append(f"YouTube投稿処理:\n{log}")
 
-        if where in ("tiktok", "both"):
+        if tiktok_manual:
+            out.append(f"🖐 **TikTokは手動で投稿してください**（目安 {tk_when}）\n"
+                       f"　動画: `{runner.tiktok_mp4(name)}`\n"
+                       f"　投稿文は**次のメッセージをそのままコピー**して貼り付け")
+
+        if where in ("tiktok", "both") and auto:
             out.append(f"⚠️ TikTokは予約日時がズレることがあるので、押す前に"
                        f"**{tk_when.replace('翌朝', '明日 ').replace('夜', '今夜 ')}**"
                        f"になっているか目視確認してね")
         if needs_hand:
             out.append("※ Macの前に居られない時は `おまかせ投稿` と送れば確定まで自動で押します")
         await send(ch, "\n".join(out))
+
+        # 投稿文は**単独のメッセージ**でコードブロックに入れる。まわりの説明が
+        # 一緒にコピーされないようにするため（コピーボタン／長押しでそのまま取れる）。
+        if tiktok_manual:
+            cap = runner.tiktok_caption(name)
+            if cap:
+                await ch.send(f"```\n{cap}\n```")
+                # 5_分析 はこの行のキャプションで実測と回を突合する。手動投稿でも
+                # 残しておかないと、新しい回が 実績.tsv に載らなくなる。
+                await asyncio.to_thread(runner.log_manual_tiktok, name, cap)
+            else:
+                await ch.send("⚠️ TikTok用の投稿文が見つかりません: "
+                              f"`{runner.caption_txt(name, 'tiktok')}`")
+
         if errors:
             await ask_codex(ch, f"{name} の投稿準備（{where}）", "\n\n".join(errors))
 
@@ -938,9 +963,14 @@ async def on_message(msg: discord.Message) -> None:
             await ch.send("⚠️ 投稿できる動画がまだありません")
             return
         dest = await route(ch, target)
-        mode = "確定まで自動で押します" if auto_press else "TikTokの確定は社長が押してください"
-        await dest.send(f"📤 **{target}** を TikTok と YouTube に予約します"
-                        f"（{runner.slot_label(slot)}・{mode}）")
+        if auto_press:
+            head = (f"📤 **{target}** を TikTok と YouTube に予約します"
+                    f"（{runner.slot_label(slot)}・確定まで自動で押します）")
+        else:
+            head = (f"📤 **{target}** — YouTubeを予約し"
+                    f"（{runner.slot_label(slot, 'youtube')}）、"
+                    "TikTokは**貼る投稿文を出します**（手動投稿）")
+        await dest.send(head)
         await do_post(dest, target, "both", slot, auto_press)
         return
 
