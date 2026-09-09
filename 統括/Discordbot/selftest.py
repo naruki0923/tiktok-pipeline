@@ -8,6 +8,7 @@ Discordでメッセージを送るだけで動くはず。
 """
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -16,6 +17,8 @@ from pathlib import Path
 
 import config
 import runner
+
+HERE = Path(__file__).resolve().parent
 
 ok_all = True
 
@@ -47,6 +50,35 @@ def llm_check() -> tuple[bool, str]:
         return llm.check()
     except Exception as e:  # noqa: BLE001
         return False, f"読めません({e})"
+
+
+def agent_loaded() -> bool:
+    """launchd に常駐登録されているか。
+
+    2026-09-09: Botのプロセスがいつの間にか消えていて、6:00の自動生成が丸ごと
+    飛んだ（issue #3）。環境は全部✔だったのに1本も出ない、という一番分かりにくい
+    落ち方をする。selftest が見ていたのは「起動できる状態か」だけで、
+    「落ちても勝手に起き上がるか」を見ていなかった。
+    """
+    p = subprocess.run(
+        ["launchctl", "print", f"gui/{os.getuid()}/com.taisyoku.discordbot"],
+        capture_output=True, text=True)
+    return p.returncode == 0
+
+
+def bot_running() -> str:
+    """生死は .bot.pid で見る。
+
+    `pgrep -f .venv/bin/python` では当たらない。.venv/bin/python は symlink で、
+    ps に出るのは Homebrew 側の実体パスになるため。
+    """
+    pidfile = HERE / ".bot.pid"
+    if not pidfile.exists():
+        return "動いていません"
+    pid = pidfile.read_text().strip()
+    p = subprocess.run(["ps", "-p", pid, "-o", "command="],
+                       capture_output=True, text=True)
+    return f"稼働中 (PID {pid})" if "bot.py" in p.stdout else "動いていません"
 
 
 def main() -> None:
@@ -106,12 +138,17 @@ def main() -> None:
     except ImportError:
         check("discord.py", False, "pip install -r requirements.txt")
 
+    print("\n── 常駐 ──")
+    check("launchd に登録済み（落ちても勝手に起き上がる）", agent_loaded(),
+          "./install_agent.sh を実行する（/bin/bash にフルディスクアクセスが要る）")
+    print(f"  いまのBot: {bot_running()}")
+
     print("\n── 直近の状態 ──")
     print(f"  完成済みの最新: {runner.latest_ready() or 'なし'}")
     scripts = sorted(config.SCRIPT_TXT_DIR.glob("本番_*.txt"))
     print(f"  台本: {len(scripts)}本（最新 {scripts[-1].stem if scripts else 'なし'}）")
 
-    print("\n" + ("🟢 準備OK。./run.sh で起動できます" if ok_all
+    print("\n" + ("🟢 準備OK。常駐しているので放っておけば毎朝走ります" if ok_all
                   else "🟡 ✘ の項目を潰してから起動してください"))
     sys.exit(0 if ok_all else 1)
 

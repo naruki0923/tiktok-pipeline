@@ -3,3 +3,5 @@
 .cache/
 state.json
 __pycache__/
+.bot.pid
+bot.log
