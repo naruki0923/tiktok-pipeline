@@ -31,6 +31,8 @@ class DoMakeRetryTest(IsolatedAsyncioTestCase):
             patch.object(bot, "send", AsyncMock()),
             patch.object(bot.asyncio, "sleep", AsyncMock()),
             patch.object(config, "AUTO_RETRY_MAX", 2),
+            # 外付けSSDの有無でテスト結果が変わらないように、既定は「読める」で固定
+            patch.object(bot.runner, "bg_dir_problem", return_value=None),
         ]
         for p in self.stack:
             p.start()
@@ -79,6 +81,24 @@ class DoMakeRetryTest(IsolatedAsyncioTestCase):
             await bot.do_make(self.th, "name", "本番_999")
         self.assertEqual(once.await_count, 1)
         codex.assert_not_awaited()
+
+
+    async def test_stops_before_using_a_script_when_the_ssd_is_unreadable(self):
+        """背景素材が読めない時は、リサーチも台本も使わずに1回で止める。
+
+        2026-09-10はこれが無く、台本6本と参考動画6本を使い切ったうえで
+        合成の直前に2時間ずつ固まった。人がSSDを挿す／許可を押すまで
+        何度作り直しても同じなので、作り直しもしない。
+        """
+        with (patch.object(bot.runner, "bg_dir_problem",
+                           return_value="🚫 背景素材（外付けSSD）が使えません"),
+              patch.object(bot, "make_once", AsyncMock()) as once,
+              patch.object(bot, "ask_codex", AsyncMock()) as codex):
+            await bot.do_make(self.th, "auto")
+        once.assert_not_awaited()
+        codex.assert_not_awaited()
+        bot.send.assert_awaited_once()
+        self.assertIn("背景素材", bot.send.await_args.args[1])
 
 
 class ReloadCodeTest(IsolatedAsyncioTestCase):
