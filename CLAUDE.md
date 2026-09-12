@@ -168,6 +168,13 @@ TikTokアフィリエイト用の動画を自動で作成し、自動で投稿�
     `codex login status` がChatGPTログインを示す時だけ動き、APIキーは子プロセスへ渡さない。
     投稿・アップロードは行わず、結果を同じDiscordスレッドへ返す。`.env` の
     `AUTO_CODEX_RESCUE=0` で停止できる。
+    - **使うcodexは自動で新しい方を選ぶ**（2026-09-11修正）。モデルを決めるのは
+      ChatGPT.appが書く `~/.codex/config.toml` で、PATH上のcodex（Homebrew）だけ
+      古いと「そのモデルには新しいCodexが要る」で400になる。**その時でも終了コードは0**
+      なので、返り値だけ見ていると成功と区別が付かない。2026-09-10は救援が6回とも
+      即死していたのに誰も気づけなかった。いまは `codex_rescue.codex_bin()` が
+      PATHとChatGPT.app同梱の新しい方を採り、出力に失敗の印があれば
+      **短い理由（どのcodexのどの版か・どう直すか）だけ**を返す。selftest にも出る。
   - **生成がコケたら社長を待たずに自動で作り直す**（2026-08-17 社長判断）。
     Codexが直す →Botが自分の `config`/`runner`/`pipeline` を **importlib.reload** で
     読み直す → もう一度作る、を `AUTO_RETRY_MAX`（既定2）回まで。工程スクリプトは

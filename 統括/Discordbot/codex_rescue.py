@@ -2,19 +2,80 @@
 
 OpenAI APIキーは使わない。`codex login status` が ChatGPT ログインを
 示さない環境では、API課金へ意図せず切り替わるのを防ぐため実行しない。
+
+**どのcodexを呼ぶかが壊れやすい**。使うモデルは ~/.codex/config.toml から
+読まれるが、そこを書いているのはChatGPT.app（自分で更新する）で、PATH上の
+codex（Homebrew等・人が上げないと古いまま）とは別物。版がズレると
+「そのモデルには新しいCodexが要る」で毎回400になる。しかも**その時でも
+codexの終了コードは0**なので、返り値だけ見ていると成功と区別が付かない。
+2026-09-10はこれで救援が6回とも即死し、誰も気づかないまま同じ失敗を繰り返した。
 """
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 from datetime import datetime
+from pathlib import Path
 
 import config
 
+# ChatGPT.app が同梱しているcodex。アプリが自分で更新するので、たいていPATHのより新しい。
+APP_CODEX = Path("/Applications/ChatGPT.app/Contents/Resources/codex")
 
-def _chatgpt_login() -> tuple[bool, str]:
-    codex = shutil.which("codex")
+
+def _version(codex: str) -> tuple[int, ...]:
+    """`codex --version` の数字。取れなければ空タプル（＝一番古い扱い）。"""
+    try:
+        p = subprocess.run([codex, "--version"], capture_output=True,
+                           text=True, timeout=20)
+    except (OSError, subprocess.TimeoutExpired):
+        return ()
+    m = re.search(r"(\d+)\.(\d+)\.(\d+)", (p.stdout or "") + (p.stderr or ""))
+    return tuple(int(x) for x in m.groups()) if m else ()
+
+
+def codex_bin() -> tuple[str, tuple[int, ...]]:
+    """使うcodexと、その版を返す。無ければ ("", ())。
+
+    **PATHのものとChatGPT.app同梱の、新しい方**を採る。モデルを決めるのは
+    アプリ側の config.toml なので、CLIだけ古いと動かない。同点ならPATHを優先
+    （人が意図して入れたものを尊重する）。
+    """
+    cands: list[tuple[tuple[int, ...], int, str]] = []
+    path_codex = shutil.which("codex")
+    if path_codex:
+        cands.append((_version(path_codex), 1, path_codex))
+    if APP_CODEX.exists():
+        cands.append((_version(str(APP_CODEX)), 0, str(APP_CODEX)))
+    if not cands:
+        return "", ()
+    ver, _, best = max(cands)
+    return best, ver
+
+
+# 「動いたように見えて実は何もしていない」印。codexは400でも終了コード0を返す。
+_FAILED = re.compile(r'^ERROR: \{|requires a newer version of Codex'
+                     r'|"type"\s*:\s*"(invalid_request_error|error)"', re.M)
+
+
+def _why_failed(text: str, codex: str, ver: tuple[int, ...]) -> str | None:
+    """出力が「実は動いていない」時だけ、短い理由を返す。"""
+    if not _FAILED.search(text or ""):
+        return None
+    shown = ".".join(str(x) for x in ver) or "版不明"
+    if "requires a newer version of Codex" in text:
+        model = (re.search(r"The '([^']+)' model requires", text) or [None, "?"])[1]
+        return (f"Codex CLIが古くてモデル `{model}` を使えません"
+                f"（使ったのは `{codex}` v{shown}）。\n"
+                "`brew upgrade codex` で上げるか、ChatGPT.appを最新にしてください。")
+    msg = re.search(r'"message"\s*:\s*"([^"]+)"', text)
+    return (f"Codexがエラーを返しました（`{codex}` v{shown}）: "
+            f"{msg.group(1) if msg else text.strip()[-300:]}")
+
+
+def _chatgpt_login(codex: str) -> tuple[bool, str]:
     if not codex:
         return False, "codex CLIが見つかりません"
     try:
@@ -56,11 +117,11 @@ def run(context: str, error: str) -> tuple[bool, str]:
     """Codexを非対話実行し、(正常終了, Discord向け要約) を返す。"""
     if not config.AUTO_CODEX_RESCUE:
         return False, "エラー時のCodex自動起動はオフです"
-    logged_in, detail = _chatgpt_login()
+    codex, ver = codex_bin()
+    logged_in, detail = _chatgpt_login(codex)
     if not logged_in:
         return False, detail
 
-    codex = shutil.which("codex")
     out_dir = config.CACHE / "codex_rescue"
     out_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
@@ -88,8 +149,13 @@ def run(context: str, error: str) -> tuple[bool, str]:
     except OSError as e:
         return False, f"Codexを起動できませんでした: {e}"
 
-    if summary_file.exists():
-        summary = summary_file.read_text(encoding="utf-8").strip()
-    else:
-        summary = (p.stderr or p.stdout or "結果を取得できませんでした").strip()[-3000:]
-    return p.returncode == 0, summary or "Codexの報告は空でした"
+    summary = (summary_file.read_text(encoding="utf-8").strip()
+               if summary_file.exists()
+               else (p.stderr or p.stdout or "結果を取得できませんでした").strip())
+
+    # 終了コード0でも動いていないことがある。**先にそれを見る**。
+    # 失敗時の -o の中身は送ったプロンプトのechoで数千字あり、肝心の1行が埋もれる。
+    why = _why_failed(summary + "\n" + (p.stdout or "") + "\n" + (p.stderr or ""), codex, ver)
+    if why:
+        return False, f"🛠 Codexは動けませんでした。\n{why}\n（詳細: `{log_file}`）"
+    return p.returncode == 0, summary[-3000:] or "Codexの報告は空でした"

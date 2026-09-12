@@ -15,6 +15,7 @@ import sys
 import urllib.request
 from pathlib import Path
 
+import codex_rescue
 import config
 import runner
 
@@ -110,9 +111,12 @@ def main() -> None:
 
     print("\n── 外部ツール ──")
     check("ffmpeg", bool(shutil.which("ffmpeg")), "brew install ffmpeg")
-    codex = shutil.which("codex")
+    # `which codex` ではなく、救援が実際に使う方を見る。PATHのcodexが古いと
+    # モデルを扱えず400で即死するのに、終了コードは0なので気づけない（issue #9）。
+    codex, ver = codex_rescue.codex_bin()
     check("Codex CLI", bool(codex), "Codexをインストールする")
     if codex:
+        print(f"  救援が使う: {codex} v{'.'.join(str(x) for x in ver) or '版不明'}")
         p = subprocess.run([codex, "login", "status"], capture_output=True, text=True)
         login = "\n".join((p.stdout, p.stderr))
         check("CodexのChatGPTログイン", p.returncode == 0 and "ChatGPT" in login,
