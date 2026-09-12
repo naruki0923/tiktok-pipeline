@@ -304,6 +304,61 @@ def make_video(name: str) -> tuple[bool, str]:
     return ok, log
 
 
+# 背景素材（外付けSSD）が読めるかの下見にかける制限時間。
+# 読めれば0.1秒で終わる処理なので、これを超えたら「待たされている」と断じてよい。
+BG_CHECK_TIMEOUT = 25
+
+
+def bg_dir_problem() -> str | None:
+    """背景素材フォルダが読めない理由を返す。読めるなら None。
+
+    **音声を作る前に、必ず別プロセスで確かめる。**
+
+    2026-09-10、これが無いせいで丸一日ぶんの生成を落とした。macOSは
+    「リムーバブルボリューム内のファイル」の許可を持たないプロセスが
+    /Volumes/… に触ると確認ダイアログを出し、**返事があるまで listdir を止める**。
+    無人の06:00には誰も押さないので10分待って拒否になり、その繰り返しで
+    make_video が `──② 背景素材の選定` の直後から進まなくなる。
+    40分のタイムアウト＋90分の猶予を使い切って初めて失敗が分かり、
+    自動作り直しでそれを3回繰り返す（1本あたり2時間11分×6回で本番_073〜078が全滅）。
+
+    Bot本体で listdir を試すと同じダイアログに道連れにされるので、子プロセスに
+    やらせて timeout で切り上げる。パスの持ち主は make_video.py 側（--check-bg）に
+    任せ、ここでは二重に持たない。
+    """
+    if not config.VIDEO_PY.exists():
+        return f"🚫 動画生成のPythonが見つかりません: `{config.VIDEO_PY}`"
+    try:
+        p = subprocess.run([str(config.VIDEO_PY), "make_video.py", "--check-bg"],
+                           cwd=str(config.VIDEO_SCRIPTS), capture_output=True,
+                           text=True, timeout=BG_CHECK_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        return ("🚫 背景素材（外付けSSD）の中を読めませんでした"
+                f"（{BG_CHECK_TIMEOUT}秒待っても返事なし）。動画は作らずに止めます。\n\n"
+                "macOSの「取り外し可能なボリューム」の許可待ちで固まっている可能性が高いです。\n"
+                "・画面に『Pythonが取り外し可能なボリュームのファイルに"
+                "アクセスしようとしています』というダイアログが出ていたら"
+                "【許可】を押してください\n"
+                "・無人でも動くようにするなら、システム設定 → プライバシーとセキュリティ →\n"
+                "　フルディスクアクセス → ＋ →（⌘⇧Gで）次を追加してオンにし、Botを再起動:\n"
+                f"```\n{_base_python()}\n```")
+    except OSError as e:
+        return f"🚫 背景素材の確認を実行できません: {e}"
+    if p.returncode != 0:
+        return ("🚫 背景素材（外付けSSD）が使えません。動画は作らずに止めます。\n"
+                f"```\n{((p.stdout or '') + (p.stderr or '')).strip()[-800:]}\n```")
+    return None
+
+
+def _base_python() -> str:
+    """このBotを動かしている本体のpython（venvのリンク先）。
+
+    macOSの許可はvenvの中のリンクではなく**リンク先の実体**に付くので、
+    設定画面に足すべきパスとしてこれを見せる。
+    """
+    return os.path.realpath(getattr(sys, "_base_executable", None) or sys.executable)
+
+
 def _wait_for_render(name: str, started: float, grace: int = 5400) -> tuple[bool, str]:
     """タイムアウト後、レンダリングが本当に死んだのかを見に行く。
 

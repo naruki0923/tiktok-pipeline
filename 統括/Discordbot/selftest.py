@@ -118,9 +118,16 @@ def main() -> None:
         check("CodexのChatGPTログイン", p.returncode == 0 and "ChatGPT" in login,
               "codex login でChatGPTアカウントにログインする（APIキーは使わない）")
     check("VOICEVOX ENGINE (50021)", voicevox_up(), "VOICEVOX.app を起動する")
-    check("背景動画（外付けSSD）",
-          Path("/Volumes/Extreme SSD/素材/動画・画像素材/4K 散歩動画").exists(),
-          "外付けSSD「Extreme SSD」を繋ぐ")
+    # exists() では足りない。フォルダはあるのに**中を読む時だけ**macOSの許可待ちで
+    # 固まることがある（2026-09-10、それで6本ぶん落とした）。実際に読んで確かめる。
+    bg = runner.bg_dir_problem()
+    check("背景動画（外付けSSD）を読める", bg is None,
+          (bg or "").replace("\n", " ")[:200] or "外付けSSD「Extreme SSD」を繋ぐ")
+    if bg is None:
+        print("  ※ これはターミナルから見た結果です。launchd で常駐しているBotは"
+              "別扱いなので、\n    Botだけが読めない時は下のパスに"
+              "フルディスクアクセスを与えてください:")
+        print(f"    {runner._base_python()}")
     ok_llm, detail = llm_check()
     check(f"台本生成のLLM経路（{detail}）", ok_llm,
           "ターミナルで `claude` を起動し /login でログインし直す")

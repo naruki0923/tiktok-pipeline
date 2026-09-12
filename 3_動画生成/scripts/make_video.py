@@ -121,7 +121,10 @@ def main():
     sys.stdout.reconfigure(line_buffering=True)   # 子プロセスの出力と順番が入れ替わらないように
     ap = argparse.ArgumentParser(
         description="台本 → 音声 → 合成 を一発で回す（未知のオプションは compose_video.py に渡す）")
-    ap.add_argument("script", help="台本テキスト（1行1フレーズ・句読点なし・文末は空行）")
+    ap.add_argument("script", nargs="?",
+                    help="台本テキスト（1行1フレーズ・句読点なし・文末は空行）")
+    ap.add_argument("--check-bg", action="store_true",
+                    help="背景素材フォルダが読めるかだけ確かめて終わる（台本は要らない）")
     ap.add_argument("--name", default=None, help="出力ベース名（既定: 台本のファイル名）")
     ap.add_argument("--out-dir", default=str(HERE / ".." / "output"), help="出力フォルダ")
     ap.add_argument("--audio-dir", default=str(HERE / ".." / "音声"), help="音声の置き場")
@@ -144,6 +147,17 @@ def main():
     ap.add_argument("--gap", type=float, default=None, help="行間の無音秒数")
     ap.add_argument("--blank-gap", type=float, default=None, help="空行（文末）の無音秒数")
     args, compose_args = ap.parse_known_args()
+
+    # 背景素材を読めるかだけ見る。**音声を作る前に呼べる**ようにここに置く。
+    # 外付けSSDが外れている・macOSの「リムーバブルボリューム」の許可待ちで
+    # 固まる、といった事故を、2時間かけずに数秒で見つけるため（2026-09-10）。
+    if args.check_bg:
+        bgs = pick_backgrounds(Path(args.bg_dir), args.seed, args.min_bg_secs)
+        print(f"[OK] 背景素材 {len(bgs)}本が読めます: {args.bg_dir}")
+        return
+
+    if not args.script:
+        ap.error("台本を指定してください（読めるかの確認だけなら --check-bg）")
 
     script = Path(args.script).resolve()
     if not script.exists():
