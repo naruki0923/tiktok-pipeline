@@ -37,13 +37,32 @@
 
 ---
 
+## 週次レビューの実測は TikTok Studio の CSV（2026-09-13〜）
+週次レビュー（`weekly_review.py`）が使う「動画ごとの再生数・公開日」は、**社長が手で落とした
+Content.csv** から作る。ブラウザ自動化（投稿用のログイン済みChrome）でのスクレイピングはやめた
+（issue #14。業務アカウントを巻き込まない・規約上クリーン・UI変更で壊れない）。
+
+1. 毎週日曜20〜22時: PCで [TikTok Studio → アナリティクス](https://www.tiktok.com/tiktokstudio/analytics)
+   → **コンテンツ**タブ → 期間「過去60日」 → 「データをダウンロード」（Content.csv）
+2. そのファイルを **Discord のチャンネルに投げる** → Bot が `5_分析/取込/Content_YYYYMMDD_HHMMSS.csv` に保存
+3. 22:00 に週次レビューが `取込/` の最新CSVから `実績.tsv` を更新して分析する。
+   22:00になってもCSVが無ければ Bot が催促し、**届いた時点で**分析を始める
+   （先週のCSVで同じ結論を繰り返しても意味が無いので、来るまで走らせない）
+
+- 「概要」タブの Overview.csv（日別合計）も投げてよい。保存だけして週次には使わない
+- CSVは15本前後しか入らない（期間内に再生があった動画）。`update_results.py` は前回の行を
+  残して今回の分だけ上書きするので、毎週足せば溜まる
+- CSVの「Post time」は年が無い（「9月6日」）→ URLの動画IDのアップロード時刻で年を補う
+- 手で回すなら: `cd 5_分析/scripts && python3 update_results.py --from-csv ~/Downloads/Content.csv`
+
 ## 使い方（実装済み・手動入力＋CSV）
 数値の取得は当面**手動**（TikTokアプリ/管理画面のインサイトを見て入力）。育ったらブラウザ自動化に差し替える。
 スクリプトは標準ライブラリのみで動くので venv 不要（`python3` 一発）。尺はffprobeで自動取得。
 
 ### ① 指標を記録する（投稿ごと・確認時間は毎回そろえる／例: 投稿24h後）
 
-**(a) 自動取得（推奨・一部項目）** — `metrics_fetch.py`
+**(a) ブラウザ自動取得（非推奨・残置）** — `metrics_fetch.py`
+※投稿用のログイン済みChromeで Studio を開く。業務アカウントを巻き込むので使わない方針（上の CSV 運用へ）。
 TikTok Studioのコンテンツ一覧をブラウザ自動化で読み、post_logのキャプションで動画を突合して
 **再生数・いいね・コメント・尺・投稿日**を自動でCSV追記する。4_投稿 の browser_ctx（CDP接続で
 検知回避）とログインセッション(.chrome-profile)を共有するので、playwright入りの4_投稿 venvで実行:

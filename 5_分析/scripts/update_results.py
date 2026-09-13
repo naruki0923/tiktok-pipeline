@@ -6,18 +6,21 @@
   **当たった角度ほど「重複」で弾かれて二度と作れない**状態だった。実績を持たせて
   「1万再生以上の角度は再訪してよい／むしろ優先」と判定させるための材料がこれ。
 
-取得元:
-  - 公開URL一覧 … 自分のプロフィールのグリッド（未ログインでも読める）
-  - 実数        … 動画ページの埋め込みJSON（ログイン済Chromeで直叩き。Studio一覧は
-                  遅延読み込みが不安定で新しい動画が落ちるため使わない）
+取得元（2026-09-13 に CSV へ切り替え。ブラウザは開かない）:
+  - 実数        … TikTok Studio → アナリティクス → **コンテンツ** → 「データをダウンロード」で
+                  落とした Content.csv（5_分析/取込/ に置く。1行＝1動画。公式のエクスポート）
+  - 公開日      … CSVの「Post time」は年が無いので、URLの動画ID（上位32bitが投稿時刻）から出す
   - 角度/タイトル … 統括/Discordbot/state.json（036以降）＋ 4_投稿/ログ/post_log.csv
 
-使い方（4_投稿のvenvで実行。playwright が要る）:
+  以前は投稿用のログイン済みChromeでプロフィールと動画ページを開いて拾っていたが、
+  業務アカウントでのスクレイピングをやめた（issue #14）。その経路は `--browser` に残してある。
+
+使い方（標準ライブラリのみ。python3 一発）:
     cd 5_分析/scripts
-    ../../4_投稿/scripts/.venv/bin/python update_results.py            # 直近30本を取り直す
-    ../../4_投稿/scripts/.venv/bin/python update_results.py --limit 60
-    ../../4_投稿/scripts/.venv/bin/python update_results.py --from-json ../レポート/_fetch_debug/xxx.json
-前提: 4_投稿/scripts/login.py 済み（.chrome-profile）。1本あたり20〜40秒かかる。
+    python3 update_results.py                          # 取込/ の一番新しい Content*.csv を使う
+    python3 update_results.py --from-csv ~/Downloads/Content.csv
+    ../../4_投稿/scripts/.venv/bin/python update_results.py --browser   # 旧経路（非推奨）
+取込/ に CSV が無いときは終了コード 2（週次レビューはこれを見て「先週の実績のまま」で進む）。
 """
 from __future__ import annotations
 
@@ -36,6 +39,8 @@ sys.path.insert(0, str(BASE / "4_投稿" / "scripts"))
 from own_account import tiktok_account  # noqa: E402  (BASE を確定させてから読む)
 
 OUT = BASE / "5_分析" / "実績.tsv"
+INBOX = BASE / "5_分析" / "取込"           # 手で落とした Content*.csv を置く場所
+NO_CSV = 2                                # 取込/ が空のときの終了コード
 POST_LOG = BASE / "4_投稿" / "ログ" / "post_log.csv"
 STATE = BASE / "統括" / "Discordbot" / "state.json"
 # ⚠️ アカウント名はコードに書かない（公開リポジトリなので）。
@@ -77,6 +82,104 @@ def angles() -> dict[str, dict]:
         return json.load(STATE.open(encoding="utf-8")).get("videos", {})
     except (json.JSONDecodeError, OSError):
         return {}
+
+
+# TikTok Studio の CSV は表示言語で列名が変わる。名前でなく「含まれる語」で列を探す
+_COLS = {
+    "title": ("video title", "title", "タイトル", "動画名"),
+    "url":   ("link", "url", "リンク"),
+    "views": ("views", "再生", "視聴"),
+    "likes": ("likes", "いいね"),
+    "comments": ("comments", "コメント"),
+    "shares": ("shares", "シェア", "共有"),
+    "post":  ("post time", "post date", "投稿日", "公開日"),
+}
+
+
+def _find_col(header: list[str], keys: tuple[str, ...]) -> int | None:
+    for i, h in enumerate(header):
+        hl = h.strip().lower()
+        if any(k in hl for k in keys):
+            return i
+    return None
+
+
+def _num(s: str) -> int:
+    s = (s or "").replace(",", "").strip()
+    m = re.match(r"^([\d.]+)\s*([KMk万]?)$", s)
+    if not m:
+        return 0
+    return int(float(m.group(1)) * {"": 1, "K": 1e3, "k": 1e3, "M": 1e6, "万": 1e4}[m.group(2)])
+
+
+def _post_date(text: str, floor: datetime) -> datetime | None:
+    """CSVの「9月6日」「2026-09-06」「9/6」を日付にする。年が無ければ floor 以降の最初の年。
+
+    floor は動画IDから出したアップロード時刻。予約投稿はアップロードの翌朝に公開されるので
+    公開日は必ず floor 以降＝年またぎ（12/31にアップ→1/1公開）もこれで正しく出る。
+    """
+    m = re.search(r"(\d{4})[-/年](\d{1,2})[-/月](\d{1,2})", text)
+    if m:
+        y, mo, d = (int(x) for x in m.groups())
+        return datetime(y, mo, d)
+    m = re.search(r"(\d{1,2})[/月](\d{1,2})", text)
+    if not m:
+        return None
+    mo, d = int(m.group(1)), int(m.group(2))
+    try:
+        cand = datetime(floor.year, mo, d)
+    except ValueError:
+        return None
+    if cand.date() < floor.date():
+        cand = cand.replace(year=floor.year + 1)
+    return cand
+
+
+def parse_content_csv(path: Path) -> list[dict]:
+    """Studio の Content.csv → probe_page と同じ形（title/url/views/upload_date …）。
+
+    列の並びや言語が違っても、タイトル・リンク・再生数の3列が見つかれば読める。
+    公開日は CSV の「Post time」（年が無い）を、動画IDのアップロード時刻で年を補って使う。
+    Post time が読めなければ動画IDの日付（アップロード日＝公開の前日のことが多い）。
+    """
+    text = path.read_text(encoding="utf-8-sig")
+    rows = list(csv.reader(text.splitlines()))
+    if not rows:
+        return []
+    header = rows[0]
+    ci = {k: _find_col(header, keys) for k, keys in _COLS.items()}
+    missing = [k for k in ("title", "url", "views") if ci[k] is None]
+    if missing:
+        raise ValueError(f"{path.name}: 列が見つかりません {missing} / header={header}")
+    out = []
+    for r in rows[1:]:
+        if len(r) <= max(ci["title"], ci["url"], ci["views"]):
+            continue
+        url = r[ci["url"]].strip().split("?")[0]
+        m = re.search(r"/video/(\d+)", url)
+        if not m:
+            continue
+        ts = int(m.group(1)) >> 32
+        uploaded = datetime.fromtimestamp(ts)
+        posted = None
+        if ci["post"] is not None and len(r) > ci["post"]:
+            posted = _post_date(r[ci["post"]], uploaded)
+        d = {"title": r[ci["title"]].strip(), "url": url,
+             "views": _num(r[ci["views"]]),
+             "upload_date": (posted or uploaded).strftime("%Y%m%d")}
+        for k in ("likes", "comments", "shares"):
+            if ci[k] is not None and len(r) > ci[k]:
+                d[k] = _num(r[ci[k]])
+        out.append(d)
+    return out
+
+
+def latest_inbox_csv() -> Path | None:
+    """取込/ で一番新しい Content*.csv。無ければ None。"""
+    if not INBOX.exists():
+        return None
+    cands = [p for p in INBOX.glob("*.csv") if p.name.lower().startswith("content")]
+    return max(cands, key=lambda p: p.stat().st_mtime) if cands else None
 
 
 def collect(limit: int) -> list[dict]:
@@ -135,10 +238,30 @@ def main() -> int:
     ap.add_argument("--limit", type=int, default=30, help="取り直す本数（新しい順）")
     ap.add_argument("--from-json", type=Path, default=None,
                     help="取得済みJSON（probe_page 形式）を使う。ブラウザを開かない")
+    ap.add_argument("--from-csv", type=Path, default=None,
+                    help="TikTok Studio の Content.csv を使う（既定: 取込/ の最新）")
+    ap.add_argument("--browser", action="store_true",
+                    help="旧経路。投稿用Chromeで動画ページを開いて拾う（非推奨）")
     args = ap.parse_args()
 
-    rows = (json.loads(args.from_json.read_text(encoding="utf-8"))
-            if args.from_json else collect(args.limit))
+    source = ""
+    if args.from_json:
+        rows = json.loads(args.from_json.read_text(encoding="utf-8"))
+        source = args.from_json.name
+    elif args.browser:
+        rows = collect(args.limit)
+        source = "browser"
+    else:
+        path = args.from_csv or latest_inbox_csv()
+        if not path or not path.exists():
+            print(f"取込/ に Content*.csv がありません（{INBOX}）。\n"
+                  "TikTok Studio → アナリティクス → コンテンツ → 「データをダウンロード」で"
+                  "落として置いてください", file=sys.stderr)
+            return NO_CSV
+        rows = parse_content_csv(path)
+        mtime = datetime.fromtimestamp(path.stat().st_mtime)
+        source = f"{path.name} ({mtime:%Y-%m-%d})"
+        print(f"📥 {path.name}: {len(rows)}本", file=sys.stderr)
     idx, meta = caption_index(), angles()
 
     # 既存行は残し、今回取れたぶんだけ上書きする（古い動画の実績を消さない）
@@ -165,6 +288,7 @@ def main() -> int:
                       (m.get("angle") or title)[:60], title[:60]]
 
     lines = ["# 自分の投稿の角度×実績。write_script.py の重複判定が読む。",
+             f"# 更新 {datetime.now():%Y-%m-%d} / 出典 {source}",
              "# 動画名\t公開日\t再生数\t角度\tタイトル"]
     lines += ["\t".join(v) for _, v in sorted(keep.items())]
     OUT.write_text("\n".join(lines) + "\n", encoding="utf-8")

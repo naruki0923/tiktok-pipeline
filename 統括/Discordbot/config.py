@@ -74,6 +74,7 @@ POST_LOG = ROOT / "4_投稿" / "ログ" / "post_log.csv"    # 5_分析 がキャ
 
 ANALYSIS_SCRIPTS = ROOT / "5_分析" / "scripts"
 WEEKLY_REVIEW = ANALYSIS_SCRIPTS / "weekly_review.py"   # 週次レビュー（標準ライブラリのみ）
+INBOX = ROOT / "5_分析" / "取込"     # 社長が Discord に投げた TikTok Studio の CSV を置く
 
 # プレビュー用の圧縮動画・ポスターの置き場
 CACHE = BOT_DIR / ".cache"
