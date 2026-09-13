@@ -101,6 +101,7 @@ class NudgeThenRunTest(TestCase):
             patch.object(runner, "load_state", side_effect=lambda: self.state),
             patch.object(runner, "save_state", side_effect=lambda s: self.state.update(s)),
             patch.object(bot, "_channel", return_value=self.ch),
+            patch.object(bot, "_analysis_channel", return_value=self.ch),
             patch.object(bot, "do_weekly", new=AsyncMock()),
         ]
         for p in self.patches:

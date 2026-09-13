@@ -44,6 +44,9 @@ cd 統括/Discordbot
 cp .env.example .env
 ```
 `DISCORD_BOT_TOKEN` と `DISCORD_CHANNEL_ID` を記入する。
+分析を別チャンネルに分けるなら `DISCORD_ANALYSIS_CHANNEL_ID` も（プライベートチャンネルなら
+「メンバーまたはロールを追加」で Bot を入れておくこと。入れないと `Missing Access` で何も出ない）。
+そこでは **Content.csv の受け取り → 催促 → 週次レビューの結果** までを扱い、生成・投稿は元のチャンネルのまま。
 
 ### 3. 常駐させる（初回に1回だけ）
 ```bash

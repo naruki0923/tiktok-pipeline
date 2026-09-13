@@ -19,6 +19,9 @@ load_dotenv(BOT_DIR / ".env")
 BOT_TOKEN = os.environ.get("DISCORD_BOT_TOKEN", "")
 # 通知・操作を受け付けるチャンネルID（数字）。空なら最初に話しかけられた場所を採用。
 CHANNEL_ID = int(os.environ.get("DISCORD_CHANNEL_ID") or 0)
+# 分析用チャンネル（任意）。ここでは CSV の受け取り・催促・週次レビューの結果だけを扱い、
+# 動画の生成・投稿は上の CHANNEL_ID 側のまま。空なら全部 CHANNEL_ID に出す
+ANALYSIS_CHANNEL_ID = int(os.environ.get("DISCORD_ANALYSIS_CHANNEL_ID") or 0)
 # 任意: このユーザーID以外のコマンドを無視する
 ALLOWED_USER_ID = int(os.environ.get("DISCORD_ALLOWED_USER_ID") or 0)
 # 動画が出来て「あとは投稿だけ」の時に名指し(@)して通知を飛ばす相手。
