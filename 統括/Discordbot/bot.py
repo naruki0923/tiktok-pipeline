@@ -977,6 +977,11 @@ async def on_message(msg: discord.Message) -> None:
 
     # 週次レビューを今すぐ回す（定刻を待たずに分析したい時）
     if any(k in text for k in ("分析", "レビュー")) and not post_kw:
+        # 「分析とめて」で2本目が走った（2026-09-13）。止める言葉が入っていたら始めない
+        if any(k in text for k in ("止め", "とめ", "停止", "やめ", "中止", "キャンセル")):
+            await ch.send("🛑 走り出した週次レビューは途中で止められません（数分で終わります。"
+                          "投稿には触りません）。定期実行を切るなら `週次オフ`")
+            return
         _save_weekly(waiting_csv="")      # 手動で回すなら催促は取り下げる
         target = _analysis_channel() or ch
         if _home_id(target) != _home_id(ch):
