@@ -1,0 +1,12 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Video Stats Sync - Connected</title><link rel="stylesheet" href="_style.css"></head><body>
+<h1>Connected to TikTok</h1>
+<p id="msg">Reading the authorization code…</p>
+<p>Copy the code below and paste it into the terminal running <code>tiktok_auth.py</code>.</p>
+<pre id="code" style="font-size:1.1em;padding:12px;background:#f3f3f3;border-radius:6px;word-break:break-all"></pre>
+<script>
+const q=new URLSearchParams(location.search);
+const code=q.get("code"), err=q.get("error");
+if(code){document.getElementById("code").textContent=code;document.getElementById("msg").textContent="Authorization succeeded.";}
+else{document.getElementById("msg").textContent="No code received"+(err?": "+err+" — "+(q.get("error_description")||""):".");}
+</script>
+</body></html>
