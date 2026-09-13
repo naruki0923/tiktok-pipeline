@@ -2,6 +2,23 @@
 <h1>Video Stats Sync</h1>
 <p>Video Stats Sync is a private, single-user tool. It lets the owner of a TikTok account sign in with TikTok and fetch the list of their <strong>own</strong> videos together with public statistics (view, like, comment and share counts). The numbers are stored locally on the owner's computer and used to see which topics perform well.</p>
 <p>The tool is not offered to the public. It does not post, edit or delete anything on TikTok.</p>
+<p><a id="login" href="#" style="display:inline-block;background:#fe2c55;color:#fff;padding:12px 22px;border-radius:8px;text-decoration:none;font-weight:600">Log in with TikTok</a>
+<span id="hint" style="margin-left:10px;color:#666"></span></p>
+<p>After you log in and authorize the app, you are sent back to this site with a code. The local script <code>tiktok_api.py</code> exchanges the code for a token and fetches your video list.</p>
 <ul><li><a href="terms.html">Terms of Service</a></li><li><a href="privacy.html">Privacy Policy</a></li></ul>
+<script>
+// client_key は tiktok_api.py auth が ?k= で渡す（サンドボックス/本番で違うため固定しない）
+const q=new URLSearchParams(location.search);
+const k=q.get("k"), state=q.get("state")||Math.random().toString(36).slice(2);
+const a=document.getElementById("login");
+if(k){
+  a.href="https://www.tiktok.com/v2/auth/authorize/?"+new URLSearchParams({
+    client_key:k, scope:"user.info.basic,video.list", response_type:"code",
+    redirect_uri:"https://naruki0923.github.io/tiktok-pipeline/callback.html", state:state});
+}else{
+  document.getElementById("hint").textContent="Start from `python3 tiktok_api.py auth` — it opens this page with your app's client key.";
+  a.style.opacity=.5; a.addEventListener("click",e=>e.preventDefault());
+}
+</script>
 <p><small>Contact: yonenaru0923@gmail.com</small></p>
 </body></html>
