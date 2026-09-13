@@ -464,10 +464,19 @@ def csv_kind(name: str, head: bytes) -> str | None:
 
 
 def save_csv(kind: str, data: bytes, when: datetime | None = None) -> Path:
-    """取込/ に日付付きで保存する。同じ日に2回来たら後の方が新しい（mtime で選ばれる）。"""
+    """取込/ に日付付きで保存する。
+
+    7日版と60日版を1つのメッセージに2つ付けると同じ秒に来るので、名前が被ったら
+    `_2` `_3` を足す（被ったまま書くと1つ目が消える。2026-09-13 のテストで発覚）。
+    """
     when = when or datetime.now()
     config.INBOX.mkdir(parents=True, exist_ok=True)
-    path = config.INBOX / f"{kind}_{when:%Y%m%d_%H%M%S}.csv"
+    stem = f"{kind}_{when:%Y%m%d_%H%M%S}"
+    path = config.INBOX / f"{stem}.csv"
+    n = 1
+    while path.exists():
+        n += 1
+        path = config.INBOX / f"{stem}_{n}.csv"
     path.write_bytes(data)
     return path
 

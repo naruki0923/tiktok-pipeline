@@ -817,18 +817,18 @@ async def take_csv(msg: discord.Message) -> bool:
                                    "（Content.csv か Overview.csv を投げてね）")
             continue
         path = runner.save_csv(kind, data)
-        saved.append((kind, path))
+        saved.append((kind, att.filename, path))
     if not saved:
         return False
     lines = []
-    for kind, path in saved:
+    for kind, orig, path in saved:
         n = runner.csv_rows(path)
         what = "動画ごとの実績" if kind == "Content" else "日別の合計"
-        lines.append(f"📥 {kind}.csv を受け取りました（{what}・{n}行）→ `取込/{path.name}`")
+        lines.append(f"📥 {orig} を受け取りました（{what}・{n}行）→ `取込/{path.name}`")
     await msg.channel.send("\n".join(lines))
 
     w = _weekly()
-    if w.get("waiting_csv") and any(k == "Content" for k, _ in saved):
+    if w.get("waiting_csv") and any(k == "Content" for k, _, _ in saved):
         _save_weekly(waiting_csv="")
         # スレッドに投げられても週次のスレッドは分析チャンネル（親）に立てる
         await do_weekly(_analysis_channel() or msg.channel,

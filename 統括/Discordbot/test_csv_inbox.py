@@ -47,6 +47,16 @@ class InboxTest(TestCase):
         self.assertEqual(CONTENT, p.read_bytes())
         self.assertEqual(1, runner.csv_rows(p))
 
+    def test_two_files_in_the_same_second_do_not_overwrite_each_other(self) -> None:
+        """7日版と60日版を1メッセージに2つ付けると同じ秒に来る。"""
+        when = datetime(2026, 9, 13, 21, 5, 7)
+        a = runner.save_csv("Content", CONTENT, when)
+        b = runner.save_csv("Content", OVERVIEW, when)
+
+        self.assertNotEqual(a, b)
+        self.assertEqual("Content_20260913_210507_2.csv", b.name)
+        self.assertEqual(CONTENT, a.read_bytes())
+
     def test_csv_since_only_sees_content_files_newer_than_the_cutoff(self) -> None:
         import os
         old = runner.save_csv("Content", CONTENT, datetime(2026, 9, 6, 21, 0))
