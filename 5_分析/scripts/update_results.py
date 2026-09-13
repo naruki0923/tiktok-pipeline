@@ -9,6 +9,10 @@
 取得元（2026-09-13 に CSV へ切り替え。ブラウザは開かない）:
   - 実数        … TikTok Studio → アナリティクス → **コンテンツ** → 「データをダウンロード」で
                   落とした Content.csv（5_分析/取込/ に置く。1行＝1動画。公式のエクスポート）
+                  **エクスポートは「期間内の再生で上位15本」しか出ない**。そこで期間「過去7日」
+                  （今週の新作は低くても全部入る）と「過去60日」（当たり動画の累計を更新）の
+                  2ファイルを毎週落とし、取込/ の Content*.csv を**全部合算**する。同じ動画は
+                  再生数の大きい行（＝新しい累計）を採る。古いファイルが残っていても害はない
   - 公開日      … CSVの「Post time」は年が無いので、URLの動画ID（上位32bitが投稿時刻）から出す
   - 角度/タイトル … 統括/Discordbot/state.json（036以降）＋ 4_投稿/ログ/post_log.csv
 
@@ -17,8 +21,8 @@
 
 使い方（標準ライブラリのみ。python3 一発）:
     cd 5_分析/scripts
-    python3 update_results.py                          # 取込/ の一番新しい Content*.csv を使う
-    python3 update_results.py --from-csv ~/Downloads/Content.csv
+    python3 update_results.py                          # 取込/ の Content*.csv を全部合算する
+    python3 update_results.py --from-csv ~/Downloads/Content.csv   # 1ファイルだけ
     ../../4_投稿/scripts/.venv/bin/python update_results.py --browser   # 旧経路（非推奨）
 取込/ に CSV が無いときは終了コード 2（週次レビューはこれを見て「先週の実績のまま」で進む）。
 """
@@ -174,12 +178,28 @@ def parse_content_csv(path: Path) -> list[dict]:
     return out
 
 
-def latest_inbox_csv() -> Path | None:
-    """取込/ で一番新しい Content*.csv。無ければ None。"""
+def inbox_csvs() -> list[Path]:
+    """取込/ の Content*.csv を古い順に。無ければ空。"""
     if not INBOX.exists():
-        return None
+        return []
     cands = [p for p in INBOX.glob("*.csv") if p.name.lower().startswith("content")]
-    return max(cands, key=lambda p: p.stat().st_mtime) if cands else None
+    return sorted(cands, key=lambda p: p.stat().st_mtime)
+
+
+def latest_inbox_csv() -> Path | None:
+    cs = inbox_csvs()
+    return cs[-1] if cs else None
+
+
+def merge_rows(*groups: list[dict]) -> list[dict]:
+    """複数CSVの行を動画URLで合算。同じ動画は再生数の大きい方（＝新しい累計）を残す。"""
+    best: dict[str, dict] = {}
+    for rows in groups:
+        for r in rows:
+            u = r.get("url", "")
+            if u and (u not in best or r.get("views", 0) >= best[u].get("views", 0)):
+                best[u] = r
+    return list(best.values())
 
 
 def collect(limit: int) -> list[dict]:
@@ -252,16 +272,29 @@ def main() -> int:
         rows = collect(args.limit)
         source = "browser"
     else:
-        path = args.from_csv or latest_inbox_csv()
-        if not path or not path.exists():
+        paths = [args.from_csv] if args.from_csv else inbox_csvs()
+        paths = [p for p in paths if p and p.exists()]
+        if not paths:
             print(f"取込/ に Content*.csv がありません（{INBOX}）。\n"
                   "TikTok Studio → アナリティクス → コンテンツ → 「データをダウンロード」で"
                   "落として置いてください", file=sys.stderr)
             return NO_CSV
-        rows = parse_content_csv(path)
-        mtime = datetime.fromtimestamp(path.stat().st_mtime)
-        source = f"{path.name} ({mtime:%Y-%m-%d})"
-        print(f"📥 {path.name}: {len(rows)}本", file=sys.stderr)
+        groups = []
+        for path in paths:
+            try:
+                g = parse_content_csv(path)
+            except ValueError as e:
+                print(f"⚠️ {e}", file=sys.stderr)
+                continue
+            groups.append(g)
+            print(f"📥 {path.name}: {len(g)}本", file=sys.stderr)
+        if not groups:
+            return 1
+        rows = merge_rows(*groups)
+        newest = max(paths, key=lambda p: p.stat().st_mtime)
+        mtime = datetime.fromtimestamp(newest.stat().st_mtime)
+        source = f"{len(paths)}ファイル合算・最新 {newest.name} ({mtime:%Y-%m-%d})"
+        print(f"→ 合算 {len(rows)}本", file=sys.stderr)
     idx, meta = caption_index(), angles()
 
     # 既存行は残し、今回取れたぶんだけ上書きする（古い動画の実績を消さない）

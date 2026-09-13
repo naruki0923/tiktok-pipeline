@@ -98,3 +98,17 @@ class LatestInboxTest(TestCase):
 
 if __name__ == "__main__":
     main()
+
+
+class MergeRowsTest(TestCase):
+    def test_same_video_keeps_the_larger_view_count(self) -> None:
+        """7日版と60日版で同じ動画が出る。累計は増えるだけなので大きい方＝新しい方。"""
+        a = [{"url": "u1", "views": 100}, {"url": "u2", "views": 5}]
+        b = [{"url": "u1", "views": 120}, {"url": "u3", "views": 7}]
+
+        got = {r["url"]: r["views"] for r in ur.merge_rows(a, b)}
+
+        self.assertEqual({"u1": 120, "u2": 5, "u3": 7}, got)
+
+    def test_rows_without_url_are_dropped(self) -> None:
+        self.assertEqual([], ur.merge_rows([{"url": "", "views": 1}]))

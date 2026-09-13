@@ -53,8 +53,8 @@ PROPOSAL_DIR = ROOT / "1_リサーチ"
 
 FETCH_TIMEOUT = 120         # ①の上限（秒）。CSVを読むだけなので短くてよい
 CSV_STALE_DAYS = 8          # 取込のCSVがこれより古ければ「先週のまま」と警告する
-CSV_HOWTO = ("TikTok Studio → アナリティクス → コンテンツ → 「データをダウンロード」で落として、"
-             "Discord にそのまま投げてください")
+CSV_HOWTO = ("TikTok Studio → アナリティクス → コンテンツ → 期間を「過去7日」と「過去60日」にして"
+             "それぞれ「データをダウンロード」→ 2つとも Discord に投げてください")
 MIN_KEYWORDS, MAX_KEYWORDS = 4, 8
 MAX_KEYWORD_LEN = 20
 MAX_FOCUS_CHARS = 1200      # 台本プロンプトを膨らませすぎない上限
@@ -81,8 +81,10 @@ def latest_csv() -> Path | None:
 
 
 def fetch_results() -> str:
-    """update_results.py に取込/ の Content.csv を読ませて 実績.tsv を最新にする。
+    """update_results.py に取込/ の Content*.csv を全部合算させて 実績.tsv を最新にする。
 
+    エクスポートは「期間内の再生で上位15本」しか出ないので、7日版（今週の新作が低くても
+    全部入る）と60日版（当たり動画の累計）の両方を合算する。
     CSVが無い・古い・壊れていても止めない。**先週までの実績で判断は続けられる**ので、
     警告だけ残して進む（Bot側は定刻にCSVが無ければ先に催促して、来てから呼ぶ）。
     """
@@ -92,7 +94,7 @@ def fetch_results() -> str:
     age = (datetime.now() - datetime.fromtimestamp(path.stat().st_mtime)).days
     try:
         p = subprocess.run(
-            [sys.executable, str(UPDATE_RESULTS), "--from-csv", str(path)],
+            [sys.executable, str(UPDATE_RESULTS)],
             cwd=str(HERE), capture_output=True, text=True, timeout=FETCH_TIMEOUT,
         )
     except subprocess.TimeoutExpired:
