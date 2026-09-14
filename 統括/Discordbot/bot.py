@@ -11,6 +11,7 @@ LINE版と違い**トンネル(cloudflared)もwebhook登録も要らない**。D
   「投稿 035」「035 投稿」    → 指定した回を投稿
   「毎日18時」「自動オフ」「自動」 → 自動実行の時刻設定・停止・状態
   「分析」「毎週日曜22時」「週次オフ」 → 週次レビュー（分析→検索語・台本方針の更新）
+  Content.csv を投げる          → TikTok Studio の実績を 5_分析/取込/ に保存（週次の材料）
   「ヘルプ」「状態」          → 使い方
 
 **投稿は社長が「投稿」と言った時（またはボタンを押した時）だけ実行する**。
@@ -72,7 +73,10 @@ HELP = """**📱 使い方**
 　社長が `作って` と言い直さなくてOK。※**投稿だけは今までどおり合図が要る**
 
 **分析（毎週日曜22:00に勝手に走る）**
-・`分析` … 今すぐ週次レビュー。実測を取り直し、**検索語と台本の重点方針を更新**
+・**毎週日曜20〜22時に Content.csv を2つ投げる** … TikTok Studio → アナリティクス →
+　コンテンツ → 期間「過去7日」と「過去60日」でそれぞれ「データをダウンロード」（上位15本ずつしか
+　出ないので2つ要る）。22時になっても無ければ催促し、届き次第分析する
+・`分析` … 今すぐ週次レビュー。取込のCSVから実績を更新し、**検索語と台本の重点方針を更新**
 ・`毎週日曜22時` … 曜日と時刻を変更　・`週次オフ` … 停止　・`週次` … いまの設定
 　※更新されるのは検索語と方針まで。ネタ提案は下書きで、採用/却下は社長
 
@@ -118,6 +122,17 @@ def _channel() -> discord.abc.Messageable | None:
     return bot.get_channel(int(cid)) if cid else None
 
 
+def _analysis_channel() -> discord.abc.Messageable | None:
+    """CSVの受け取り・催促・週次レビューの結果を出す先。分析用が無ければ通常のチャンネル。"""
+    if config.ANALYSIS_CHANNEL_ID:
+        return bot.get_channel(config.ANALYSIS_CHANNEL_ID) or _channel()
+    return _channel()
+
+
+def _is_analysis(ch: discord.abc.Messageable) -> bool:
+    return bool(config.ANALYSIS_CHANNEL_ID) and _home_id(ch) == config.ANALYSIS_CHANNEL_ID
+
+
 def _home_id(ch: discord.abc.Messageable) -> int:
     """スレッド内なら親チャンネルのIDを返す（許可判定はいつも親で行う）。"""
     return ch.parent_id if isinstance(ch, discord.Thread) else getattr(ch, "id", 0)
@@ -132,9 +147,11 @@ def auto_status() -> str:
 
 def weekly_status() -> str:
     w = _weekly()
+    waiting = "\n　⏳ 今週の Content.csv 待ち（届いたらすぐ分析します）" if w.get("waiting_csv") else ""
     return (f"📊 週次レビュー: {'🟢オン' if w['enabled'] else '⚪️オフ'} / "
             f"毎週{DOW_JA[int(w['dow']) % 7]}曜 {w['time']}\n"
-            "　→ 実測を取り直し、検索語と台本の重点方針を更新（**投稿はしない**）")
+            "　→ TikTok Studio の Content.csv（Discordに投げる）から実績を更新し、"
+            "検索語と台本の重点方針を更新（**投稿はしない**）" + waiting)
 
 
 # --- ボタン -----------------------------------------------------------------
@@ -748,15 +765,75 @@ async def weekly_tick(now: datetime) -> bool:
     late = (now - due).total_seconds()
     if late > CATCHUP_LIMIT or w["last_fired"] == due.strftime("%Y-%m-%d"):
         return False
-    ch = _channel()
+    ch = _analysis_channel()
     if not ch:
         print("[weekly] 通知先チャンネル未登録のため発火スキップ")
         return False
     _save_weekly(last_fired=due.strftime("%Y-%m-%d"))
     delay = "" if late < 120 else f"（定刻{w['time']}に寝てたので今から）"
+    # 今週分の Content.csv（前回の定刻より後に届いたもの）が無ければ、走らせずに催促する。
+    # 先週のCSVで分析しても同じ結論を繰り返すだけなので、届いてから走らせる（on_message）
+    if not runner.csv_since(due - timedelta(days=7)):
+        _save_weekly(waiting_csv=due.strftime("%Y-%m-%d"))
+        await ch.send(csv_nudge(w, due))
+        return True
+    _save_weekly(waiting_csv="")
     await do_weekly(ch, headline=(
         f"📊 **毎週{DOW_JA[int(w['dow']) % 7]}曜 {w['time']} 週次レビュー**{delay}"
         " — 先週の実測を見て、リサーチと台本の方針を更新します"))
+    return True
+
+
+def csv_nudge(w: dict, due: datetime) -> str:
+    mention = f"<@{_owner_id()}> " if _owner_id() else ""
+    return (f"{mention}📥 **今週の Content.csv がまだ届いていません**（{due:%m/%d} {w['time']} 週次レビュー）\n"
+            "TikTok Studio → アナリティクス → **コンテンツ** → 期間を**「過去7日」と「過去60日」**にして"
+            "それぞれ「データをダウンロード」→ 2つともこのチャンネルに投げてください。"
+            "届いたらそのまま分析を始めます（1つ目が届いた時点で始めるので、**2つ一緒に**投げてね）")
+
+
+def _owner_id() -> int:
+    return int(config.MENTION_USER_ID or runner.load_state().get("owner_id", 0) or 0)
+
+
+async def take_csv(msg: discord.Message) -> bool:
+    """添付の TikTok Studio CSV を 5_分析/取込/ に保存する。保存したら True。
+
+    催促中（定刻にCSVが無かった週）なら、届いた時点で週次レビューを走らせる。
+    定刻前に届いた分は置いておくだけで、定刻に weekly_tick が拾う。
+    """
+    saved = []
+    for att in msg.attachments:
+        if not att.filename.lower().endswith(".csv"):
+            continue
+        try:
+            data = await att.read()
+        except discord.HTTPException as e:
+            await msg.channel.send(f"⚠️ {att.filename} を読めませんでした: {e}")
+            continue
+        kind = runner.csv_kind(att.filename, data)
+        if not kind:
+            await msg.channel.send(f"🤔 {att.filename} は TikTok Studio の CSV に見えません"
+                                   "（Content.csv か Overview.csv を投げてね）")
+            continue
+        path = runner.save_csv(kind, data)
+        saved.append((kind, att.filename, path))
+    if not saved:
+        return False
+    lines = []
+    for kind, orig, path in saved:
+        n = runner.csv_rows(path)
+        what = "動画ごとの実績" if kind == "Content" else "日別の合計"
+        lines.append(f"📥 {orig} を受け取りました（{what}・{n}行）→ `取込/{path.name}`")
+    await msg.channel.send("\n".join(lines))
+
+    w = _weekly()
+    if w.get("waiting_csv") and any(k == "Content" for k, _, _ in saved):
+        _save_weekly(waiting_csv="")
+        # スレッドに投げられても週次のスレッドは分析チャンネル（親）に立てる
+        await do_weekly(_analysis_channel() or msg.channel,
+                        headline=f"📊 **週次レビュー**（{w['waiting_csv']} 分・CSVが届いたので今から）"
+                                 " — 先週の実測を見て、リサーチと台本の方針を更新します")
     return True
 
 
@@ -843,7 +920,7 @@ async def on_message(msg: discord.Message) -> None:
         return
     # スレッド内の発言も受ける（判定は常に親チャンネルで行う）
     home = _home_id(msg.channel)
-    if config.CHANNEL_ID and home != config.CHANNEL_ID:
+    if config.CHANNEL_ID and home not in (config.CHANNEL_ID, config.ANALYSIS_CHANNEL_ID):
         return
     if config.ALLOWED_USER_ID and msg.author.id != config.ALLOWED_USER_ID:
         return
@@ -852,17 +929,26 @@ async def on_message(msg: discord.Message) -> None:
     # スレッドのIDを覚えてしまうと毎朝の自動実行が古いスレッドに埋もれるので親を覚える
     s = runner.load_state()
     changed = False
-    if not config.CHANNEL_ID and s.get("channel_id") != home:
+    if not config.CHANNEL_ID and s.get("channel_id") != home and home != config.ANALYSIS_CHANNEL_ID:
         s["channel_id"], changed = home, True
     if not config.MENTION_USER_ID and s.get("owner_id") != msg.author.id:
         s["owner_id"], changed = msg.author.id, True
     if changed:
         runner.save_state(s)
 
+    if msg.attachments and await take_csv(msg):
+        return
     text = msg.content.strip()
     if not text:
         return
     ch = msg.channel
+
+    # 分析用チャンネルで扱うのは CSV・分析・週次の設定・ヘルプだけ。生成や投稿はここでは受けない
+    if _is_analysis(ch) and not any(k in text for k in
+                                    ("分析", "レビュー", "週次", "毎週", "ヘルプ", "help", "使い方", "状態")):
+        await ch.send("ここは分析用です。動画を作る・投稿するのは元のチャンネルで言ってね。"
+                      "ここでできるのは: Content.csv を投げる / `分析` / `週次` / `毎週日曜22時` / `週次オフ`")
+        return
 
     post_kw = any(k in text for k in ("投稿", "アップ", "出す", "出して"))
     # 「おまかせ投稿」「自動で投稿」= TikTokの確定ボタンまで自動で押す
@@ -891,7 +977,16 @@ async def on_message(msg: discord.Message) -> None:
 
     # 週次レビューを今すぐ回す（定刻を待たずに分析したい時）
     if any(k in text for k in ("分析", "レビュー")) and not post_kw:
-        await do_weekly(ch, headline="📊 **週次レビュー**（手動）"
+        # 「分析とめて」で2本目が走った（2026-09-13）。止める言葉が入っていたら始めない
+        if any(k in text for k in ("止め", "とめ", "停止", "やめ", "中止", "キャンセル")):
+            await ch.send("🛑 走り出した週次レビューは途中で止められません（数分で終わります。"
+                          "投稿には触りません）。定期実行を切るなら `週次オフ`")
+            return
+        _save_weekly(waiting_csv="")      # 手動で回すなら催促は取り下げる
+        target = _analysis_channel() or ch
+        if _home_id(target) != _home_id(ch):
+            await ch.send("📊 分析チャンネルの方で始めます")
+        await do_weekly(target, headline="📊 **週次レビュー**（手動）"
                                      " — 実測を見て、リサーチと台本の方針を更新します")
         return
 

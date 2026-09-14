@@ -5,7 +5,9 @@
 何を変えるか決める→リサーチと台本に反映する」を1本にまとめたもの。
 
 やること（この順）:
-  ① 実測の取り直し … update_results.py（5_分析/実績.tsv を最新に）
+  ① 実測の取り直し … update_results.py（5_分析/取込/ の Content.csv → 実績.tsv）
+                     CSVは社長が TikTok Studio から手で落として Discord に投げる（Botが取込/へ保存）。
+                     以前は投稿用Chromeでスクレイピングしていたがやめた（issue #14）
   ② 材料集め       … feedback_context.py（metrics/投稿ログ/採用履歴/参考動画プール）
   ③ 判断           … LLMを**1回だけ**呼ぶ（プロンプト_週次反映.md）
   ④ 反映           … 検索語.json / 重点方針.md を書き換える（＝次の生成から効く）
@@ -19,10 +21,10 @@
 書き換えると戻せなくなるので、**機械が書く場所を分けてある**。どちらも上書き前の
 中身を週次レポートに丸ごと残すので、git で戻せる。
 
-使い方（venv不要。python3 一発。①だけ 4_投稿 の venv を内部で呼ぶ）:
+使い方（venv不要。python3 一発。ブラウザは開かない）:
     cd 5_分析/scripts
-    python3 weekly_review.py                # 通し（Chromeを使う。10〜20分）
-    python3 weekly_review.py --no-fetch     # ①を飛ばす（Chromeを使わない）
+    python3 weekly_review.py                # 通し（取込/ の最新CSV → 実績 → LLM → 反映）
+    python3 weekly_review.py --no-fetch     # ①を飛ばす（実績.tsv を今のまま使う）
     python3 weekly_review.py --dry-run      # 反映せず、何が変わるかだけ見る
 
 最後の1行に結果のJSONを出す（Discord Bot はこれを読む）。
@@ -40,8 +42,8 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent              # 5_分析/scripts
 ROOT = HERE.parents[1]                              # プロジェクトルート
 GEN_SCRIPTS = ROOT / "2_台本生成" / "scripts"
-POST_PY = ROOT / "4_投稿" / "scripts" / ".venv" / "bin" / "python"   # playwright入り
 UPDATE_RESULTS = HERE / "update_results.py"
+INBOX = ROOT / "5_分析" / "取込"                          # Content*.csv を置く場所
 
 PROMPT_MD = ROOT / "5_分析" / "プロンプト_週次反映.md"
 REPORT_DIR = ROOT / "5_分析" / "レポート"
@@ -49,8 +51,10 @@ KEYWORDS_JSON = ROOT / "1_リサーチ" / "検索語.json"      # auto_research.
 FOCUS_MD = ROOT / "2_台本生成" / "重点方針.md"           # write_script.py が読む
 PROPOSAL_DIR = ROOT / "1_リサーチ"
 
-FETCH_LIMIT = 30            # 実測を取り直す本数（1本20〜40秒かかる）
-FETCH_TIMEOUT = 2400        # ①の上限（秒）。超えたら古い実績のまま先へ進む
+FETCH_TIMEOUT = 120         # ①の上限（秒）。CSVを読むだけなので短くてよい
+CSV_STALE_DAYS = 8          # 取込のCSVがこれより古ければ「先週のまま」と警告する
+CSV_HOWTO = ("TikTok Studio → アナリティクス → コンテンツ → 期間を「過去7日」と「過去60日」にして"
+             "それぞれ「データをダウンロード」→ 2つとも Discord に投げてください")
 MIN_KEYWORDS, MAX_KEYWORDS = 4, 8
 MAX_KEYWORD_LEN = 20
 MAX_FOCUS_CHARS = 1200      # 台本プロンプトを膨らませすぎない上限
@@ -68,27 +72,41 @@ class ReviewError(RuntimeError):
 
 
 # --- ① 実測の取り直し -------------------------------------------------------
-def fetch_results(limit: int) -> str:
-    """update_results.py を回して 実績.tsv を最新にする。失敗しても止めない。
+def latest_csv() -> Path | None:
+    """取込/ の一番新しい Content*.csv。無ければ None。"""
+    if not INBOX.exists():
+        return None
+    cands = [p for p in INBOX.glob("*.csv") if p.name.lower().startswith("content")]
+    return max(cands, key=lambda p: p.stat().st_mtime) if cands else None
 
-    TikTokは日によってブロックしてくるし、Chromeが固まっていることもある。
-    ここでコケても**先週までの実績で判断は続けられる**ので、警告だけ残して進む。
+
+def fetch_results() -> str:
+    """update_results.py に取込/ の Content*.csv を全部合算させて 実績.tsv を最新にする。
+
+    エクスポートは「期間内の再生で上位15本」しか出ないので、7日版（今週の新作が低くても
+    全部入る）と60日版（当たり動画の累計）の両方を合算する。
+    CSVが無い・古い・壊れていても止めない。**先週までの実績で判断は続けられる**ので、
+    警告だけ残して進む（Bot側は定刻にCSVが無ければ先に催促して、来てから呼ぶ）。
     """
-    if not POST_PY.exists():
-        return f"⚠️ 実測の取り直しを飛ばしました（{POST_PY} が無い）"
+    path = latest_csv()
+    if not path:
+        return f"⚠️ 取込/ に Content.csv が無いので先週の実績のまま進めます。{CSV_HOWTO}"
+    age = (datetime.now() - datetime.fromtimestamp(path.stat().st_mtime)).days
     try:
         p = subprocess.run(
-            ["/usr/bin/caffeinate", "-i", "-m", "-s",
-             str(POST_PY), str(UPDATE_RESULTS), "--limit", str(limit)],
+            [sys.executable, str(UPDATE_RESULTS)],
             cwd=str(HERE), capture_output=True, text=True, timeout=FETCH_TIMEOUT,
         )
     except subprocess.TimeoutExpired:
-        return f"⚠️ 実測の取り直しがタイムアウト（{FETCH_TIMEOUT}秒）。前回の実績で進めます"
+        return f"⚠️ 実績の更新がタイムアウト（{FETCH_TIMEOUT}秒）。前回の実績で進めます"
     except OSError as e:
-        return f"⚠️ 実測の取り直しを起動できません: {e}"
+        return f"⚠️ 実績の更新を起動できません: {e}"
     if p.returncode != 0:
         tail = ((p.stdout or "") + (p.stderr or ""))[-400:]
-        return f"⚠️ 実測の取り直しに失敗（前回の実績で進めます）\n{tail}"
+        return f"⚠️ {path.name} を読めませんでした（前回の実績で進めます）\n{tail}"
+    if age >= CSV_STALE_DAYS:
+        return (f"⚠️ 取込の {path.name} は{age}日前のものです。今週分が届いていません。"
+                f"{CSV_HOWTO}")
     return ""
 
 
@@ -268,10 +286,10 @@ def write_report(res: dict, mats: str, before: dict, dry: bool) -> Path | None:
 
 
 # --- 通し -------------------------------------------------------------------
-def run(fetch: bool = True, limit: int = FETCH_LIMIT, dry: bool = False) -> dict:
+def run(fetch: bool = True, dry: bool = False) -> dict:
     warnings = []
     if fetch:
-        warn = fetch_results(limit)
+        warn = fetch_results()
         if warn:
             warnings.append(warn)
     print("■ 材料を集めています…", file=sys.stderr)
@@ -314,13 +332,12 @@ def run(fetch: bool = True, limit: int = FETCH_LIMIT, dry: bool = False) -> dict
 def main() -> int:
     ap = argparse.ArgumentParser(description="週次レビュー（分析→検索語・台本方針へ反映）")
     ap.add_argument("--no-fetch", action="store_true",
-                    help="実測の取り直し（Chrome）を飛ばす")
-    ap.add_argument("--limit", type=int, default=FETCH_LIMIT, help="実測を取り直す本数")
+                    help="実績の更新（取込/ のCSV読み込み）を飛ばす")
     ap.add_argument("--dry-run", action="store_true", help="反映せず、変わる内容だけ見る")
     args = ap.parse_args()
 
     try:
-        res = run(fetch=not args.no_fetch, limit=args.limit, dry=args.dry_run)
+        res = run(fetch=not args.no_fetch, dry=args.dry_run)
     except ReviewError as e:
         print(json.dumps({"ok": False, "reason": str(e)}, ensure_ascii=False))
         return 3

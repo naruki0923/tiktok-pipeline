@@ -444,7 +444,58 @@ def post_youtube(name: str, slot: str = "am") -> tuple[bool, str]:
 
 
 # --- 週次レビュー -----------------------------------------------------------
-WEEKLY_TIMEOUT = 3600     # 実測の取り直し（1本20〜40秒×30本）＋LLM1回ぶん
+WEEKLY_TIMEOUT = 1800     # CSV読み込み＋LLM1回ぶん（ブラウザはもう開かない）
+
+
+# --- TikTok Studio の CSV 受け取り ------------------------------------------
+# 週次レビューの実測は、社長が TikTok Studio → アナリティクス → コンテンツ →
+# 「データをダウンロード」で落とした Content.csv を Discord に投げたものを使う
+# （投稿用Chromeでのスクレイピングはやめた。issue #14）。
+
+def csv_kind(name: str, head: bytes) -> str | None:
+    """添付が Studio のどのCSVか。Content（動画ごと）/ Overview（日別）/ それ以外は None。"""
+    n = name.lower()
+    h = head[:400].decode("utf-8", "ignore").lower()
+    if n.startswith("content") or "video link" in h or "video title" in h:
+        return "Content"
+    if n.startswith("overview") or ("date" in h and "video views" in h):
+        return "Overview"
+    return None
+
+
+def save_csv(kind: str, data: bytes, when: datetime | None = None) -> Path:
+    """取込/ に日付付きで保存する。
+
+    7日版と60日版を1つのメッセージに2つ付けると同じ秒に来るので、名前が被ったら
+    `_2` `_3` を足す（被ったまま書くと1つ目が消える。2026-09-13 のテストで発覚）。
+    """
+    when = when or datetime.now()
+    config.INBOX.mkdir(parents=True, exist_ok=True)
+    stem = f"{kind}_{when:%Y%m%d_%H%M%S}"
+    path = config.INBOX / f"{stem}.csv"
+    n = 1
+    while path.exists():
+        n += 1
+        path = config.INBOX / f"{stem}_{n}.csv"
+    path.write_bytes(data)
+    return path
+
+
+def csv_rows(path: Path) -> int:
+    """データ行数（見出しを除く）。壊れていても落とさない。"""
+    try:
+        return max(sum(1 for _ in csv.reader(path.open(encoding="utf-8-sig"))) - 1, 0)
+    except OSError:
+        return 0
+
+
+def csv_since(since: datetime) -> Path | None:
+    """since 以降に届いた Content*.csv のうち一番新しいもの。無ければ None。"""
+    if not config.INBOX.exists():
+        return None
+    cands = [p for p in config.INBOX.glob("Content*.csv")
+             if datetime.fromtimestamp(p.stat().st_mtime) >= since]
+    return max(cands, key=lambda p: p.stat().st_mtime) if cands else None
 
 
 def _last_json(text: str) -> dict:
