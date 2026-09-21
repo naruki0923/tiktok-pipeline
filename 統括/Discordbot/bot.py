@@ -106,15 +106,41 @@ DOW_JA = "月火水木金土日"          # datetime.weekday() の並び（0=月
 
 def _weekly() -> dict:
     w = {"enabled": config.WEEKLY_ENABLED, "dow": config.WEEKLY_DOW,
-         "time": config.WEEKLY_TIME, "last_fired": ""}
+         "time": config.WEEKLY_TIME, "last_fired": "", "last_run_at": "", "covers": ""}
     w.update(runner.load_state().get("weekly", {}))
     return w
+
+
+def _last_run_since(w: dict) -> datetime | None:
+    """前回の週次レビューを走らせ終えた時刻。無い・壊れていれば None。"""
+    try:
+        return datetime.fromisoformat(w["last_run_at"]) if w.get("last_run_at") else None
+    except (TypeError, ValueError):
+        return None
 
 
 def _save_weekly(**fields) -> None:
     s = runner.load_state()
     s.setdefault("weekly", {}).update(fields)
     runner.save_state(s)
+
+
+def _mark_weekly_run(covers: str = "", when: datetime | None = None) -> None:
+    """週次レビューを実際に走らせ終えた時に呼ぶ。次回の csv_since 判定の起点になる。
+
+    covers はその回が「どの定刻の分か」（YYYY-MM-DD）。定刻に新着が無くても covers が
+    その定刻なら、手動で先に済ませた週なので催促しない。
+
+    先週分のCSVは定刻より少し遅れて届くことがあり、その届いた時刻が
+    「次回の定刻の7日前」より後だと次の週次で"今週分の新着"と誤認識してしまう
+    （2026-09-20、届いたCSVが無いまま先週分で回った）。last_fired（日付だけ）ではなく
+    実行時刻そのものを基準にすることで、既に消費済みのCSVを次回また拾わないようにする。
+
+    残すのは**完了**時刻。走っている最中に届いたCSV（7日版の1分後に投げられる60日版など）も
+    同じ回のものだが、開始時刻を残すとその mtime が基準より後になり次回の"新着"に数えられて
+    同じ症状が残る。完了時刻なら、その回の途中までに届いた分は必ず基準以前に収まる。
+    """
+    _save_weekly(last_run_at=(when or datetime.now()).isoformat(), covers=covers)
 
 
 def _channel() -> discord.abc.Messageable | None:
@@ -677,8 +703,12 @@ async def do_post(ch: discord.abc.Messageable, name: str, where: str, slot: str,
 
 
 # --- 週次レビュー -----------------------------------------------------------
-async def do_weekly(ch: discord.abc.Messageable, headline: str = "") -> None:
+async def do_weekly(ch: discord.abc.Messageable, headline: str = "", covers: str = "") -> None:
     """先週の実測を見て、リサーチの検索語と台本の重点方針を更新する。
+
+    covers はこの回が「どの定刻の分か」。定刻・催促経由はその定刻、手動（空）は
+    前回以降に届いたCSVを読むなら次の定刻の分として扱う（日曜19時にCSVを投げて
+    `分析` と言った後、22:00 に「まだ届いていません」と催促しないため）。
 
     やるのは Check→Act のうち**機械が決めてよいところだけ**:
       ・5_分析/実績.tsv を取り直す（＝勝ち筋/沈んだ角度の判定が最新になる）
@@ -694,6 +724,15 @@ async def do_weekly(ch: discord.abc.Messageable, headline: str = "") -> None:
         await ch.send("⏳ いま別の処理が走っています。終わってから `分析` と言ってね")
         return
     async with _busy:
+        if not covers:
+            # 手動。次の定刻が近く（PREEMPT_WINDOW 以内）、前回以降に届いたCSVを読むなら
+            # その定刻の分として扱う。定刻直後の追加分析や週の半ばの分析は翌週分にしない
+            # （翌週の催促が消えて、投げ忘れに気づけなくなる）
+            w, now = _weekly(), datetime.now()
+            prev, due = _last_run_since(w), weekly_due(w, now)
+            if prev and due and (due + timedelta(days=7)) - now <= PREEMPT_WINDOW \
+                    and runner.csv_since(prev):
+                covers = (due + timedelta(days=7)).strftime("%Y-%m-%d")
         th = await open_thread(ch, headline or "📊 週次レビューを始めます",
                                f"{datetime.now():%m/%d} 週次レビュー")
         await th.send("🔎 実測を取り直して分析します（10〜20分）。"
@@ -709,6 +748,9 @@ async def do_weekly(ch: discord.abc.Messageable, headline: str = "") -> None:
             await send(th, f"❌ 週次レビューに失敗\n```\n{log[-1200:]}\n```")
             await ask_codex(th, "週次レビュー（5_分析/scripts/weekly_review.py）", log)
             return
+        # 成功した回のCSVだけ「消費済み」にする。失敗・例外・_busy で走らなかった時は残さず、
+        # そのCSVは未消費のまま次のトリガー（定刻・届いた瞬間・手動）で再試行できるようにする
+        _mark_weekly_run(covers)
 
         body = ["📊 **週次レビュー完了**", ""]
         body += [f"・{line}" for line in res.get("summary", [])] or ["・（要点なし）"]
@@ -735,6 +777,7 @@ async def do_weekly(ch: discord.abc.Messageable, headline: str = "") -> None:
 
 # --- 自動実行 ---------------------------------------------------------------
 CATCHUP_LIMIT = 12 * 3600   # 定刻からこの時間内なら寝過ごし分を後追いで実行する
+PREEMPT_WINDOW = timedelta(hours=24)   # 次の定刻がこの範囲なら、手動 `分析` をその定刻の分と見なす
 
 
 def weekly_due(w: dict, now: datetime) -> datetime | None:
@@ -771,16 +814,26 @@ async def weekly_tick(now: datetime) -> bool:
         return False
     _save_weekly(last_fired=due.strftime("%Y-%m-%d"))
     delay = "" if late < 120 else f"（定刻{w['time']}に寝てたので今から）"
-    # 今週分の Content.csv（前回の定刻より後に届いたもの）が無ければ、走らせずに催促する。
-    # 先週のCSVで分析しても同じ結論を繰り返すだけなので、届いてから走らせる（on_message）
-    if not runner.csv_since(due - timedelta(days=7)):
-        _save_weekly(waiting_csv=due.strftime("%Y-%m-%d"))
+    # 今週分の Content.csv（前回の週次レビューを実際に走らせた後に届いたもの）が無ければ、
+    # 走らせずに催促する。先週のCSVで分析しても同じ結論を繰り返すだけなので、届いてから
+    # 走らせる（on_message）。基準を「定刻の7日前」にすると、先週分のCSVが定刻より
+    # 遅れて届いた場合にその時刻が今週の基準日時より後になり、"今週の新着"と誤認識して
+    # 先週分のまま回ってしまう（2026-09-20に発生）。実際に走らせた時刻を基準にする。
+    key = due.strftime("%Y-%m-%d")
+    since = _last_run_since(w) or due - timedelta(days=7)
+    if not runner.csv_since(since):
+        if w.get("covers") == key:
+            # 今週のCSVはもう手動 `分析` で読んでいる。催促も二度目の分析もしない
+            await ch.send(f"📊 {due:%m/%d} 分の週次レビューは手動で済んでいます"
+                          f"（{w['last_run_at'][11:16]}）。定刻の分は省略します")
+            return True
+        _save_weekly(waiting_csv=key)
         await ch.send(csv_nudge(w, due))
         return True
     _save_weekly(waiting_csv="")
     await do_weekly(ch, headline=(
         f"📊 **毎週{DOW_JA[int(w['dow']) % 7]}曜 {w['time']} 週次レビュー**{delay}"
-        " — 先週の実測を見て、リサーチと台本の方針を更新します"))
+        " — 先週の実測を見て、リサーチと台本の方針を更新します"), covers=key)
     return True
 
 
@@ -833,7 +886,8 @@ async def take_csv(msg: discord.Message) -> bool:
         # スレッドに投げられても週次のスレッドは分析チャンネル（親）に立てる
         await do_weekly(_analysis_channel() or msg.channel,
                         headline=f"📊 **週次レビュー**（{w['waiting_csv']} 分・CSVが届いたので今から）"
-                                 " — 先週の実測を見て、リサーチと台本の方針を更新します")
+                                 " — 先週の実測を見て、リサーチと台本の方針を更新します",
+                        covers=w["waiting_csv"])
     return True
 
 
