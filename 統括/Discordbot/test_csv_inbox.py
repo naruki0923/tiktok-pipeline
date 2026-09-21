@@ -158,6 +158,8 @@ class NudgeThenRunTest(TestCase):
         self.assertTrue(fired)
         bot.do_weekly.assert_awaited_once()
         self.assertFalse(self.state["weekly"].get("waiting_csv"))
+        # 走らせた時刻を残す。次の週次はこれより後に届いたCSVだけを新着と見る
+        self.assertEqual("2026-09-13T22:00:30", self.state["weekly"]["last_run_at"])
 
     def test_overview_alone_does_not_trigger_the_review(self) -> None:
         asyncio.run(bot.weekly_tick(datetime(2026, 9, 13, 22, 0, 30)))
@@ -183,3 +185,21 @@ class NudgeThenRunTest(TestCase):
         self.assertTrue(fired)
         bot.do_weekly.assert_not_awaited()
         self.assertEqual("2026-09-13", self.state["weekly"]["waiting_csv"])
+
+    def test_last_weeks_late_csv_does_not_count_as_this_weeks_either(self) -> None:
+        """先週分のCSVが定刻より遅れて届いても、次の週次では新着扱いしない（2026-09-20の実バグ）。
+
+        「定刻の7日前」を基準にすると、先週のCSVが定刻から46分遅れて届いた場合
+        その時刻は今週の基準（先週の定刻ちょうど）より後になり、"今週の新着"と
+        誤認識してしまう。実際に前回の週次を走らせた時刻（last_run_at）を基準にする。
+        """
+        import os
+        late = runner.save_csv("Content", CONTENT)
+        os.utime(late, (datetime(2026, 9, 13, 22, 46).timestamp(),) * 2)  # 先週22:00の定刻に46分遅れ
+        self.state["weekly"]["last_run_at"] = datetime(2026, 9, 13, 22, 46, 5).isoformat()
+
+        fired = asyncio.run(bot.weekly_tick(datetime(2026, 9, 20, 22, 0, 30)))
+
+        self.assertTrue(fired)
+        bot.do_weekly.assert_not_awaited()
+        self.assertEqual("2026-09-20", self.state["weekly"]["waiting_csv"])

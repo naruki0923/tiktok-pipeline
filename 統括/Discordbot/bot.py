@@ -106,7 +106,7 @@ DOW_JA = "月火水木金土日"          # datetime.weekday() の並び（0=月
 
 def _weekly() -> dict:
     w = {"enabled": config.WEEKLY_ENABLED, "dow": config.WEEKLY_DOW,
-         "time": config.WEEKLY_TIME, "last_fired": ""}
+         "time": config.WEEKLY_TIME, "last_fired": "", "last_run_at": ""}
     w.update(runner.load_state().get("weekly", {}))
     return w
 
@@ -115,6 +115,17 @@ def _save_weekly(**fields) -> None:
     s = runner.load_state()
     s.setdefault("weekly", {}).update(fields)
     runner.save_state(s)
+
+
+def _mark_weekly_run(when: datetime | None = None) -> None:
+    """週次レビューを実際に走らせる直前に呼ぶ。次回の csv_since 判定の起点になる。
+
+    先週分のCSVは定刻より少し遅れて届くことがあり、その届いた時刻が
+    「次回の定刻の7日前」より後だと次の週次で"今週分の新着"と誤認識してしまう
+    （2026-09-20、届いたCSVが無いまま先週分で回った）。last_fired（日付だけ）ではなく
+    実行時刻そのものを基準にすることで、既に消費済みのCSVを次回また拾わないようにする。
+    """
+    _save_weekly(last_run_at=(when or datetime.now()).isoformat())
 
 
 def _channel() -> discord.abc.Messageable | None:
@@ -771,13 +782,21 @@ async def weekly_tick(now: datetime) -> bool:
         return False
     _save_weekly(last_fired=due.strftime("%Y-%m-%d"))
     delay = "" if late < 120 else f"（定刻{w['time']}に寝てたので今から）"
-    # 今週分の Content.csv（前回の定刻より後に届いたもの）が無ければ、走らせずに催促する。
-    # 先週のCSVで分析しても同じ結論を繰り返すだけなので、届いてから走らせる（on_message）
-    if not runner.csv_since(due - timedelta(days=7)):
+    # 今週分の Content.csv（前回の週次レビューを実際に走らせた後に届いたもの）が無ければ、
+    # 走らせずに催促する。先週のCSVで分析しても同じ結論を繰り返すだけなので、届いてから
+    # 走らせる（on_message）。基準を「定刻の7日前」にすると、先週分のCSVが定刻より
+    # 遅れて届いた場合にその時刻が今週の基準日時より後になり、"今週の新着"と誤認識して
+    # 先週分のまま回ってしまう（2026-09-20に発生）。実際に走らせた時刻を基準にする。
+    try:
+        since = datetime.fromisoformat(w["last_run_at"]) if w.get("last_run_at") else due - timedelta(days=7)
+    except ValueError:
+        since = due - timedelta(days=7)
+    if not runner.csv_since(since):
         _save_weekly(waiting_csv=due.strftime("%Y-%m-%d"))
         await ch.send(csv_nudge(w, due))
         return True
     _save_weekly(waiting_csv="")
+    _mark_weekly_run(now)
     await do_weekly(ch, headline=(
         f"📊 **毎週{DOW_JA[int(w['dow']) % 7]}曜 {w['time']} 週次レビュー**{delay}"
         " — 先週の実測を見て、リサーチと台本の方針を更新します"))
@@ -830,6 +849,7 @@ async def take_csv(msg: discord.Message) -> bool:
     w = _weekly()
     if w.get("waiting_csv") and any(k == "Content" for k, _, _ in saved):
         _save_weekly(waiting_csv="")
+        _mark_weekly_run()
         # スレッドに投げられても週次のスレッドは分析チャンネル（親）に立てる
         await do_weekly(_analysis_channel() or msg.channel,
                         headline=f"📊 **週次レビュー**（{w['waiting_csv']} 分・CSVが届いたので今から）"
@@ -983,6 +1003,7 @@ async def on_message(msg: discord.Message) -> None:
                           "投稿には触りません）。定期実行を切るなら `週次オフ`")
             return
         _save_weekly(waiting_csv="")      # 手動で回すなら催促は取り下げる
+        _mark_weekly_run()
         target = _analysis_channel() or ch
         if _home_id(target) != _home_id(ch):
             await ch.send("📊 分析チャンネルの方で始めます")
