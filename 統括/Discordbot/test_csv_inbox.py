@@ -158,8 +158,6 @@ class NudgeThenRunTest(TestCase):
         self.assertTrue(fired)
         bot.do_weekly.assert_awaited_once()
         self.assertFalse(self.state["weekly"].get("waiting_csv"))
-        # 走らせた時刻を残す。次の週次はこれより後に届いたCSVだけを新着と見る
-        self.assertEqual("2026-09-13T22:00:30", self.state["weekly"]["last_run_at"])
 
     def test_overview_alone_does_not_trigger_the_review(self) -> None:
         asyncio.run(bot.weekly_tick(datetime(2026, 9, 13, 22, 0, 30)))
@@ -203,3 +201,63 @@ class NudgeThenRunTest(TestCase):
         self.assertTrue(fired)
         bot.do_weekly.assert_not_awaited()
         self.assertEqual("2026-09-20", self.state["weekly"]["waiting_csv"])
+
+
+class MarkRunTest(TestCase):
+    """last_run_at は do_weekly が実際に走り終えた時にだけ残す。
+
+    呼び出し側で開始前に残すと、①走っている最中に届いた60日版が次回の"新着"に数えられ
+    ②_busy で走らなかった時も残ってしまい届いていたCSVが"消費済み"扱いになる。
+    """
+
+    def setUp(self) -> None:
+        self._tmp = TemporaryDirectory()
+        self._orig_inbox = config.INBOX
+        config.INBOX = Path(self._tmp.name) / "取込"
+        self.state = {"weekly": {"enabled": True, "dow": 6, "time": "22:00", "last_fired": ""}}
+        self.ch = MagicMock()
+        self.ch.send = AsyncMock()
+        self.patches = [
+            patch.object(runner, "load_state", side_effect=lambda: self.state),
+            patch.object(runner, "save_state", side_effect=lambda s: self.state.update(s)),
+            patch.object(runner, "weekly_review", side_effect=self._review),
+        ]
+        for p in self.patches:
+            p.start()
+
+    def tearDown(self) -> None:
+        for p in self.patches:
+            p.stop()
+        config.INBOX = self._orig_inbox
+        self._tmp.cleanup()
+
+    def _review(self) -> tuple[bool, dict, str]:
+        # 7日版で走り出した直後に60日版が届く（2026-09-13 は 22:45:05 → 22:46:23 だった）
+        import os
+        late = runner.save_csv("Content", CONTENT, datetime(2026, 9, 13, 22, 46, 23))
+        os.utime(late, (datetime(2026, 9, 13, 22, 46, 23).timestamp(),) * 2)
+        gone = str(config.INBOX / "none.md")
+        return True, {"summary": ["ok"], "report": gone, "proposal": gone}, ""
+
+    def test_csv_arriving_during_the_run_is_folded_into_that_run(self) -> None:
+        asyncio.run(bot.do_weekly(self.ch))
+
+        since = datetime.fromisoformat(self.state["weekly"]["last_run_at"])
+        self.assertGreaterEqual(since, datetime(2026, 9, 13, 22, 46, 23))
+        self.assertIsNone(runner.csv_since(since + timedelta(microseconds=1)))
+        # 翌週の定刻には「今週分」が無いので催促に落ちる
+        with patch.object(bot, "_analysis_channel", return_value=self.ch), \
+             patch.object(bot, "do_weekly", new=AsyncMock()):
+            asyncio.run(bot.weekly_tick(datetime(2026, 9, 20, 22, 0, 30)))
+            bot.do_weekly.assert_not_awaited()
+        self.assertEqual("2026-09-20", self.state["weekly"]["waiting_csv"])
+
+    def test_busy_bailout_does_not_mark_a_run(self) -> None:
+        async def run() -> None:
+            async with bot._busy:
+                await bot.do_weekly(self.ch)
+        asyncio.run(run())
+
+        self.assertNotIn("last_run_at", self.state["weekly"])
+        runner.weekly_review.assert_not_called()
+        self.assertIn("別の処理", self.ch.send.await_args.args[0])

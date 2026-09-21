@@ -118,14 +118,22 @@ def _save_weekly(**fields) -> None:
 
 
 def _mark_weekly_run(when: datetime | None = None) -> None:
-    """週次レビューを実際に走らせる直前に呼ぶ。次回の csv_since 判定の起点になる。
+    """週次レビューを実際に走らせ終えた時に呼ぶ。次回の csv_since 判定の起点になる。
 
     先週分のCSVは定刻より少し遅れて届くことがあり、その届いた時刻が
     「次回の定刻の7日前」より後だと次の週次で"今週分の新着"と誤認識してしまう
     （2026-09-20、届いたCSVが無いまま先週分で回った）。last_fired（日付だけ）ではなく
     実行時刻そのものを基準にすることで、既に消費済みのCSVを次回また拾わないようにする。
+
+    走っている最中に届いたCSV（7日版の1分後に投げられる60日版など）も同じ回のものなので、
+    完了時刻と 取込/ の一番新しい mtime の遅い方を残す。開始時刻にすると60日版が
+    次回の"新着"に数えられて同じ症状が残る。
     """
-    _save_weekly(last_run_at=(when or datetime.now()).isoformat())
+    when = when or datetime.now()
+    newest = runner.csv_since(datetime.min)
+    if newest:
+        when = max(when, datetime.fromtimestamp(newest.stat().st_mtime))
+    _save_weekly(last_run_at=when.isoformat())
 
 
 def _channel() -> discord.abc.Messageable | None:
@@ -716,6 +724,9 @@ async def do_weekly(ch: discord.abc.Messageable, headline: str = "") -> None:
             await send(th, f"❌ 週次レビューで想定外のエラー\n```\n{detail[-1200:]}\n```")
             await ask_codex(th, "週次レビュー（5_分析/scripts/weekly_review.py）", detail)
             return
+        finally:
+            # 走らせた（成否問わず）回のCSVを次回また新着に数えない。_busy で走らなかった時は残さない
+            _mark_weekly_run()
         if not ok:
             await send(th, f"❌ 週次レビューに失敗\n```\n{log[-1200:]}\n```")
             await ask_codex(th, "週次レビュー（5_分析/scripts/weekly_review.py）", log)
@@ -796,7 +807,6 @@ async def weekly_tick(now: datetime) -> bool:
         await ch.send(csv_nudge(w, due))
         return True
     _save_weekly(waiting_csv="")
-    _mark_weekly_run(now)
     await do_weekly(ch, headline=(
         f"📊 **毎週{DOW_JA[int(w['dow']) % 7]}曜 {w['time']} 週次レビュー**{delay}"
         " — 先週の実測を見て、リサーチと台本の方針を更新します"))
@@ -849,7 +859,6 @@ async def take_csv(msg: discord.Message) -> bool:
     w = _weekly()
     if w.get("waiting_csv") and any(k == "Content" for k, _, _ in saved):
         _save_weekly(waiting_csv="")
-        _mark_weekly_run()
         # スレッドに投げられても週次のスレッドは分析チャンネル（親）に立てる
         await do_weekly(_analysis_channel() or msg.channel,
                         headline=f"📊 **週次レビュー**（{w['waiting_csv']} 分・CSVが届いたので今から）"
@@ -1003,7 +1012,6 @@ async def on_message(msg: discord.Message) -> None:
                           "投稿には触りません）。定期実行を切るなら `週次オフ`")
             return
         _save_weekly(waiting_csv="")      # 手動で回すなら催促は取り下げる
-        _mark_weekly_run()
         target = _analysis_channel() or ch
         if _home_id(target) != _home_id(ch):
             await ch.send("📊 分析チャンネルの方で始めます")
