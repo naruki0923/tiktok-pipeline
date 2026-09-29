@@ -7,10 +7,11 @@ import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase, main
+from unittest.mock import patch
 
 import weekly_review as wr
 
-GOOD = ["退職給付金", "65歳 退職 失業保険", "60歳 給付金 申請", "失業保険 知らないと損"]
+GOOD = ["退職給付金", "退職後 国民年金 免除", "60歳 給付金 申請", "失業保険 知らないと損"]
 
 
 class CleanKeywordsTest(TestCase):
@@ -32,6 +33,39 @@ class CleanKeywordsTest(TestCase):
     def test_rejects_a_non_list(self) -> None:
         self.assertEqual([], wr.clean_keywords("退職給付金"))
         self.assertEqual([], wr.clean_keywords(None))
+
+
+class OffTargetTest(TestCase):
+    """65歳系は商材の対象外。週次が再生数で戻してきても反映させない。"""
+
+    def test_drops_only_the_65_words(self) -> None:
+        kws, dropped = wr.drop_off_target_keywords([*GOOD, "65歳 退職 失業保険"])
+
+        self.assertEqual(GOOD, kws)
+        self.assertEqual(["65歳 退職 失業保険"], dropped)
+
+    def test_tops_up_from_current_keywords_when_too_few_remain(self) -> None:
+        with patch.object(wr, "current_keywords",
+                          return_value=["65歳 介護保険料 変わる", "退職 住民税 安くする"]):
+            kws, _ = wr.drop_off_target_keywords(
+                ["退職給付金", "65歳 退職 失業保険", "64歳 65歳 退職 タイミング",
+                 "失業保険 知らないと損", "60歳 給付金 申請"])
+
+        self.assertEqual(["退職給付金", "失業保険 知らないと損", "60歳 給付金 申請",
+                          "退職 住民税 安くする"], kws)
+
+    def test_focus_lines_about_65_are_removed(self) -> None:
+        text = ("**優先する入口**\n"
+                "1. 60歳到達時の給付金セット：432,412再生\n"
+                "2. 65歳前後の申請タイミングずらし（失業手当×年金同時受給）：301,844再生\n"
+                "3. 住民税・国保を下げる申請：257,123再生")
+
+        kept, dropped = wr.drop_off_target_lines(text)
+
+        self.assertNotIn("65歳", kept)
+        self.assertIn("60歳到達時", kept)
+        self.assertIn("住民税", kept)
+        self.assertEqual(1, len(dropped))
 
 
 class ApplyTest(TestCase):
@@ -67,12 +101,12 @@ class ApplyTest(TestCase):
         self.assertEqual("", wr.apply_keywords(GOOD, dry=False))
 
     def test_focus_is_written_with_a_header(self) -> None:
-        note = wr.apply_focus("年齢トリガー（65歳）を今週も継続する。手続き解説は書かない。" * 2,
+        note = wr.apply_focus("年齢トリガー（60歳）を今週も継続する。手続き解説は書かない。" * 2,
                               dry=False)
 
         body = self.focus.read_text(encoding="utf-8")
         self.assertIn("今週の重点方針", body)
-        self.assertIn("65歳", body)
+        self.assertIn("60歳", body)
         self.assertIn("更新", note)
 
     def test_focus_ignores_an_empty_answer(self) -> None:
@@ -98,7 +132,7 @@ class FocusShapeTest(TestCase):
 
     def test_drops_a_heading_the_llm_added_itself(self) -> None:
         wr.apply_focus("## 今週の重点方針（2026-09-07）\n\n"
-                       + "年齢トリガー（65歳）を優先する。手続き解説は書かない。" * 2,
+                       + "年齢トリガー（60歳）を優先する。手続き解説は書かない。" * 2,
                        dry=False)
 
         body = self.focus.read_text(encoding="utf-8")
