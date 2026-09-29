@@ -1,7 +1,7 @@
 """65歳系（商材の対象外）の判定。止めすぎると対象年齢のネタまで落ちるので両側を見る。"""
 from unittest import TestCase, main
 
-from target_age import off_target
+from target_age import drop_lines, off_target
 
 
 class OffTargetTest(TestCase):
@@ -14,7 +14,11 @@ class OffTargetTest(TestCase):
                      "六十五歳",
                      "高年齢求職者給付金は何度でも",
                      "失業手当と年金を同時に受け取る",
-                     "老齢厚生年金の繰上げ"):
+                     "老齢厚生年金の繰上げ",
+                     "64歳で年金を申請すると全額支給停止になる罠",
+                     "64歳で年金申請すると全額支給停止になる併給調整の罠",
+                     "失業手当との併給調整",
+                     "65歳を過ぎると対象外になる失業手当"):
             self.assertTrue(off_target(text), text)
 
     def test_leaves_target_age_topics_alone(self) -> None:
@@ -22,15 +26,29 @@ class OffTargetTest(TestCase):
                      "50代60代の再就職",
                      "退職後の国民年金は免除できます",
                      "住民税・国保・年金を下げる3つの申請",
+                     "国民年金と国保を同時に減免申請できます",
                      "月収65万円でも",
                      "60歳から65歳まで支給される給付金",
                      "65歳未満なら対象です",
                      "65歳になるまで受け取れます",
+                     "65歳以上の方は対象外です",
+                     "65歳を除く",
                      "165歳",
                      "失業保険 知らないと損",
                      "",
                      None):
             self.assertEqual("", off_target(text), text)
+
+
+class DropLinesTest(TestCase):
+    def test_keeps_other_lines(self) -> None:
+        kept, dropped = drop_lines("1. 60歳の給付金\n2. 65歳前後の退職\n3. 国保を下げる")
+
+        self.assertEqual("1. 60歳の給付金\n3. 国保を下げる", kept)
+        self.assertEqual(["2. 65歳前後の退職"], dropped)
+
+    def test_empty(self) -> None:
+        self.assertEqual(("", []), drop_lines(None))
 
 
 if __name__ == "__main__":

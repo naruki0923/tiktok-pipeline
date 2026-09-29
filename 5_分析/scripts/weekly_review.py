@@ -65,7 +65,7 @@ sys.path.insert(0, str(GEN_SCRIPTS))     # llm / write_script
 import feedback_context  # noqa: E402
 import llm  # noqa: E402
 import write_script  # noqa: E402  (covered_angles を再利用。実績の見方を1か所に保つ)
-from target_age import off_target  # noqa: E402
+from target_age import drop_lines, off_target  # noqa: E402
 
 
 class ReviewError(RuntimeError):
@@ -196,14 +196,6 @@ def drop_off_target_keywords(kws: list[str]) -> tuple[list[str], list[str]]:
     return (kept if len(kept) >= MIN_KEYWORDS else []), dropped
 
 
-def drop_off_target_lines(text: str) -> tuple[str, list[str]]:
-    """重点方針から65歳系を勧める行を抜く。台本LLMに「65歳で書け」と渡さないため。"""
-    kept, dropped = [], []
-    for line in (text or "").splitlines():
-        (dropped if off_target(line) else kept).append(line)
-    return "\n".join(kept), [d.strip() for d in dropped]
-
-
 def apply_keywords(kws: list[str], dry: bool) -> str:
     """検索語.json を書き換える。変化が無ければ空文字を返す。"""
     before = current_keywords()
@@ -332,24 +324,31 @@ def run(fetch: bool = True, dry: bool = False) -> dict:
 
     changes = []
     kws = clean_keywords(res.get("keywords"))
-    if res.get("keywords") and not kws:
-        warnings.append("⚠️ 検索語の形が変だったので据え置きました")
+    bad_shape = bool(res.get("keywords")) and not kws
     if not kws:
         kws = current_keywords()   # 据え置きでも、既に入っている65歳系の語は抜く
     kws, dropped = drop_off_target_keywords(kws)
-    if dropped:
+    if bad_shape:
+        warnings.append("⚠️ 検索語の形が変だったので据え置きました"
+                        + ("（65歳系の語だけは外しました）" if dropped and kws else ""))
+    elif dropped and kws:
         warnings.append(f"🚫 65歳系の検索語は外しました（商材の対象外）: {' / '.join(dropped)}")
+    elif dropped:
+        warnings.append("⚠️ 65歳系の検索語を外すと残りが足りないので、検索語は据え置きました"
+                        "（リサーチ側でも65歳系の語は使いません）")
     change = apply_keywords(kws, dry)
     if change:
         changes.append(change)
-    focus, dropped = drop_off_target_lines(res.get("focus", ""))
+    focus, dropped = drop_lines(res.get("focus", ""))
     if dropped:
         warnings.append("🚫 重点方針から65歳系の行を外しました（商材の対象外）:\n"
                         + "\n".join(f"　{d[:60]}" for d in dropped))
     change = apply_focus(focus, dry)
     if change:
         changes.append(change)
-    res["keywords"], res["focus"] = kws, focus   # レポートには実際に反映した方を残す
+    # レポートには実際に反映した方を残す（書かなかった重点方針は「据え置き」と出す）
+    res["keywords"] = kws
+    res["focus"] = focus if change else ""
 
     proposal = write_proposals(res.get("proposals", ""), dry)
     report = write_report(res, mats, before, dry)

@@ -38,7 +38,7 @@ HISTORY = HERE.parent / "採用履歴.tsv"
 YT_DLP = ROOT / "2_台本生成" / "scripts" / ".venv" / "bin" / "yt-dlp"
 
 sys.path.insert(0, str(POST_SCRIPTS))            # browser_ctx（検知回避Chrome）を借りる
-sys.path.insert(0, str(ROOT / "2_台本生成" / "scripts"))   # target_age（65歳系の判定）を借りる
+sys.path.append(str(ROOT / "2_台本生成" / "scripts"))   # target_age（65歳系の判定）だけ借りる
 
 from own_account import own_accounts  # noqa: E402  (HERE を確定させてから読む)
 from target_age import off_target  # noqa: E402
