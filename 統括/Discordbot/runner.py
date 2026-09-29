@@ -24,6 +24,10 @@ from pathlib import Path
 
 import config
 
+if str(config.GEN_SCRIPTS) not in sys.path:   # importlib.reload で読み直しても1回だけ足す
+    sys.path.append(str(config.GEN_SCRIPTS))   # target_age（65歳系の判定）だけ借りる
+from target_age import off_target  # noqa: E402
+
 # 投稿スロット→予約時刻。**TikTokとYouTubeで時刻が違う**（2026-08-05 社長指示で
 # TikTokの朝だけ8:30へ。YouTubeは6:30のまま）。1日2本運用（朝／夜＝18:30）。
 SLOTS = {
@@ -156,6 +160,23 @@ def tiktok_caption(name: str) -> str:
 # わざと重ねない（あとで `おまかせ投稿` に切り替えた時、重複投稿防止に
 # 引っかかって投稿できなくならないように）。
 MANUAL_STATUS = "manual"
+
+
+def off_target_reason(name: str) -> str:
+    """65歳系の動画なら引っかかった語を返す。投稿してよければ空文字。
+
+    65歳系は商材の対象外なので作らなくした（2026-09-29 社長判断）が、それ以前に
+    作った動画が投稿待ちで残る。番号なしの `投稿` は番号が一番大きい動画を選ぶので、
+    うっかり出さないよう投稿の入口でも止める。
+    見るのは**いま実際に出るもの**＝台本・タイトル・キャプション。state の角度は見ない
+    （`直して` で65歳の部分を消しても角度は作った時のまま残るので、直した動画まで断ってしまう）。
+    """
+    v = load_state().get("videos", {}).get(name, {})
+    texts = [str(v.get("title") or "")]
+    for p in (script_txt(name), caption_txt(name, "tiktok"), caption_txt(name, "youtube")):
+        if p.exists():
+            texts.append(p.read_text(encoding="utf-8"))
+    return off_target("\n".join(texts))
 
 
 def log_manual_tiktok(name: str, caption: str) -> bool:

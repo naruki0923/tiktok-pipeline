@@ -46,6 +46,7 @@ MAX_TELOP_CHARS = 30                               # format_script.py の既定�
 
 sys.path.insert(0, str(HERE))
 import llm  # noqa: E402
+from target_age import drop_lines, off_target  # noqa: E402
 
 
 PROMPT = """あなたは退職給付金ジャンルのTikTok台本ライターです。
@@ -55,6 +56,12 @@ PROMPT = """あなたは退職給付金ジャンルのTikTok台本ライター�
 {today}
 
 # 最優先の事前判定（台本を書く前に必ず確認）
+0. **対象年齢**: 65歳以上・65歳前後で退職する人に向けた内容（65歳の誕生日前の退職、
+   失業手当と年金の同時受給、64歳で年金を申請すると支給停止になる併給調整、
+   高年齢求職者給付金、65歳からの介護保険料など）なら ok=false。
+   商材の対象は20〜64歳で、65歳以上は最初から対象外のため。**再生が伸びた角度でも例外にしない。**
+   参考動画が65歳の話でも、中身を64歳以下向けに作り替えられるなら ok=true にして、
+   台本には65歳以上の年齢・年金との同時受給を一切出さないこと（60歳の話は対象内）。
 1. **季節性**: この内容は「今日この動画を見る人」に当てはまりますか。
    「◯月に退職すると」「年末調整」「ボーナス前」など、今日の月に当てはまらない
    月依存のネタなら ok=false にしてください。月に依存しない内容（申請手順・減免制度・
@@ -129,10 +136,11 @@ def covered_angles(exclude_ref: Path | None = None, limit: int = 18) -> str:
 
     いまは 5_分析/実績.tsv（update_results.py が作る）を読み、再生数で
     【勝ち筋】と【沈んだ角度】に分けて渡す。勝ち筋は重複を理由に落とさせない。
+    65歳系は再生に関係なく【対象外】に分ける（商材の対象外。target_age.py）。
     """
     if not RESULTS.exists():
         return "（実績データなし。5_分析/scripts/update_results.py を実行してください）"
-    won, lost, fresh = [], [], []
+    won, lost, fresh, off = [], [], [], []
     today = date.today()
     for line in RESULTS.read_text(encoding="utf-8").splitlines():
         if line.startswith("#") or not line.strip():
@@ -142,6 +150,10 @@ def covered_angles(exclude_ref: Path | None = None, limit: int = 18) -> str:
             continue
         views = int(p[2])
         row = f"- {views:,}再生 {p[3][:60]}"
+        # 65歳系は再生が伸びても商材の対象外。勝ち筋に置くと「再訪しろ」になるので分ける
+        if off_target(p[3]):
+            off.append((views, row))
+            continue
         # 再生は投稿後1ヶ月伸び続ける。若い動画を「沈んだ」に入れると、
         # まだ伸びる余地のある角度を禁止してしまう（2026-09-04）。
         try:
@@ -154,7 +166,7 @@ def covered_angles(exclude_ref: Path | None = None, limit: int = 18) -> str:
             fresh.append((views, f"- {views:,}再生 公開{age}日 {p[3][:60]}"))
         else:
             lost.append((views, row))
-    for bucket in (won, lost, fresh):
+    for bucket in (won, lost, fresh, off):
         bucket.sort(reverse=True)
     out = ["## 【勝ち筋】伸びた角度（重複を理由に落とさないこと。むしろ再訪する）"]
     out += [r for _, r in won[:limit]] or ["- （まだ無し）"]
@@ -165,6 +177,10 @@ def covered_angles(exclude_ref: Path | None = None, limit: int = 18) -> str:
     out.append(f"## 【判定中】公開{JUDGE_AFTER_DAYS}日未満（勝ち負けは未確定。"
                "直後の焼き直しは避けるが、沈んだ扱いにはしないこと）")
     out += [r for _, r in fresh[:limit]] or ["- （まだ無し）"]
+    if off:
+        out.append("")
+        out.append("## 【対象外】65歳系（再生が伸びても商材の対象外。この角度では書かない）")
+        out += [r for _, r in off[:limit]]
     return "\n".join(out)
 
 
@@ -177,7 +193,9 @@ def focus_note() -> str:
     """
     if not FOCUS.exists():
         return "（まだ無し。実績の【勝ち筋】に従うこと）"
-    return FOCUS.read_text(encoding="utf-8").strip() or "（まだ無し）"
+    # 週次が書き換えなかった週は古い方針が残る。65歳系を勧める行はここでも抜く（target_age.py）
+    text, _ = drop_lines(FOCUS.read_text(encoding="utf-8"))
+    return text.strip() or "（まだ無し）"
 
 
 def next_name() -> str:
@@ -361,6 +379,16 @@ def main() -> None:
         sys.exit(3)   # 呼び出し側が「次の候補へ」と判断できるように
 
     script = (res.get("script") or "").strip()
+    # プロンプトの指示をすり抜けて65歳系を書いてきた時の最後の砦
+    # angle は「参考は65歳向けだが64歳以下に作り替えた」のような説明が入りうるので見ない。
+    # tags はそのままキャプションになるので見る
+    hit = off_target("\n".join([script, res.get("title") or "",
+                                *(str(t) for t in res.get("tags") or [])]))
+    if hit:
+        reason = f"65歳系の内容（「{hit}」）は商材の対象外"
+        print(f"✗ 不採用: {reason}", file=sys.stderr)
+        print(json.dumps({"ok": False, "reason": reason, "name": name}, ensure_ascii=False))
+        sys.exit(3)
     if len(script) < 200:
         print(json.dumps({"ok": False, "reason": f"台本が短すぎます（{len(script)}字）"},
                          ensure_ascii=False))

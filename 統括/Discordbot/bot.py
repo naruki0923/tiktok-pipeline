@@ -214,6 +214,11 @@ class PostButton(discord.ui.DynamicItem[discord.ui.Button],
         return cls(match["name"], match["where"], match["slot"], match["auto"] == "1")
 
     async def callback(self, interaction: discord.Interaction) -> None:
+        # 65歳系は「📤 投稿します」と返す前に断る（テキストの `投稿` と揃える）
+        if runner.off_target_reason(self.vname):
+            await interaction.response.defer()
+            await refuse_off_target(await route(interaction.channel, self.vname), self.vname)
+            return
         mode = "おまかせ" if self.auto else "TikTokは手動"
         await interaction.response.send_message(
             f"📤 {self.vname} → {self.where}"
@@ -620,6 +625,18 @@ async def do_make(ch: discord.abc.Messageable, mode: str, arg: str = "",
         await send_preview(th, res["name"], head, ping=True)
 
 
+async def refuse_off_target(ch: discord.abc.Messageable, name: str) -> bool:
+    """65歳系の動画なら投稿を断って True を返す（商材の対象外。runner.off_target_reason）。"""
+    hit = runner.off_target_reason(name)
+    if not hit:
+        return False
+    await ch.send(f"🚫 **{name}** は65歳系（「{hit}」）なので投稿しません。"
+                  "商材の対象は20〜64歳で、65歳以上は対象外です。\n"
+                  f"65歳の部分だけなら `{name.split('_')[-1]} 直して 65歳の話を消して` "
+                  "で直せば投稿できます")
+    return True
+
+
 async def _do_post_inner(ch: discord.abc.Messageable, name: str, where: str, slot: str,
                          auto: bool = False) -> None:
     """既定（auto=False）は **YouTubeだけ予約し、TikTokは投稿文を出すだけ**。
@@ -627,6 +644,8 @@ async def _do_post_inner(ch: discord.abc.Messageable, name: str, where: str, slo
     TikTokは手動投稿に切り替えた（2026-09-09 社長判断）。`おまかせ投稿`
     （auto=True）と言われた時だけ、従来どおりブラウザ自動化で確定まで押す。
     """
+    if await refuse_off_target(ch, name):
+        return
     if _busy.locked():
         await ch.send("⏳ いま別の処理が走っています。終わるまで待ってね")
         return
@@ -1119,6 +1138,8 @@ async def on_message(msg: discord.Message) -> None:
             await ch.send("⚠️ 投稿できる動画がまだありません")
             return
         dest = await route(ch, target)
+        if await refuse_off_target(dest, target):   # 「📤 予約します」と言ってから断らない
+            return
         if auto_press:
             head = (f"📤 **{target}** を TikTok と YouTube に予約します"
                     f"（{runner.slot_label(slot)}・確定まで自動で押します）")

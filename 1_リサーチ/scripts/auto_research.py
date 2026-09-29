@@ -38,8 +38,10 @@ HISTORY = HERE.parent / "採用履歴.tsv"
 YT_DLP = ROOT / "2_台本生成" / "scripts" / ".venv" / "bin" / "yt-dlp"
 
 sys.path.insert(0, str(POST_SCRIPTS))            # browser_ctx（検知回避Chrome）を借りる
+sys.path.append(str(ROOT / "2_台本生成" / "scripts"))   # target_age（65歳系の判定）だけ借りる
 
 from own_account import own_accounts  # noqa: E402  (HERE を確定させてから読む)
+from target_age import off_target  # noqa: E402
 
 # 既定の検索語。1語につき12件しか出ない（未ログインの上限）ので複数振って件数を稼ぐ。
 # 2026-09-04 に伸びる型へ寄せた。実測（042〜066）で当たったのは
@@ -47,9 +49,10 @@ from own_account import own_accounts  # noqa: E402  (HERE を確定させてか�
 #   取られるお金を減らす（国保/住民税）… 243,000・77,000・1.1M
 # 逆に「申請ステップ・失業認定の手続き」系は n=9 で中央値2,841と沈んでいたので、
 # その語（"失業手当 申請" / "ハローワーク 失業認定" / "退職 手続き 損"）を外した。
+# 2026-09-29 に65歳系の語を外した。再生は伸びるが商材の対象（20〜64歳）の外（target_age.py）。
 DEFAULT_KEYWORDS = [
     "退職給付金",
-    "65歳 退職 失業保険",
+    "退職後 国民年金 免除",
     "60歳 給付金 申請",
     "退職後 国民健康保険 減免",
     "退職 住民税 安くする",
@@ -72,6 +75,8 @@ def search_keywords() -> list[str]:
         kws = [str(k).strip() for k in data.get("keywords", []) if str(k).strip()]
     except (OSError, json.JSONDecodeError, AttributeError):
         return list(DEFAULT_KEYWORDS)
+    # 週次レビューは再生数だけを見るので65歳系の語を戻してくることがある。ここでも落とす
+    kws = [k for k in kws if not off_target(k)]
     return kws or list(DEFAULT_KEYWORDS)
 
 
@@ -436,6 +441,11 @@ def main() -> None:
                 c.update(st)
                 if c["author"] in OWN_ACCOUNTS:
                     print(f"  [{i}/{budget}] 自分の動画なので除外 {c['author']}")
+                    continue
+                # 65歳系は商材の対象外。台本化で落とすとLLMを1回無駄にするのでここで弾く
+                hit = off_target(c.get("title"))
+                if hit:
+                    print(f"  [{i}/{budget}] 65歳系なので除外（{hit}） {c['author']}")
                     continue
                 if not c["views"] or c["views"] < MIN_VIEWS:
                     print(f"  [{i}/{budget}] 再生不足 {c['views'] or 0:,} {c['author']}")

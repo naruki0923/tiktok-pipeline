@@ -47,5 +47,28 @@ class ProbeTest(unittest.TestCase):
         )
 
 
+
+class SearchKeywordsTest(unittest.TestCase):
+    """65歳系の語は商材の対象外。検索語.json に残っていても使わない。"""
+
+    def test_drops_65_words_from_the_json(self) -> None:
+        import json
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as d:
+            kw = Path(d) / "検索語.json"
+            kw.write_text(json.dumps({"keywords": ["退職給付金", "65歳 退職 失業保険",
+                                                   "60歳 給付金 申請"]}, ensure_ascii=False),
+                          encoding="utf-8")
+            with patch.object(auto_research, "KEYWORDS_JSON", kw):
+                self.assertEqual(["退職給付金", "60歳 給付金 申請"],
+                                 auto_research.search_keywords())
+
+    def test_defaults_have_no_65_words(self) -> None:
+        self.assertFalse([k for k in auto_research.DEFAULT_KEYWORDS
+                          if auto_research.off_target(k)])
+
+
 if __name__ == "__main__":
     unittest.main()
