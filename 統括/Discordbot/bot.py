@@ -293,6 +293,10 @@ async def send(ch: discord.abc.Messageable, text: str, **kw) -> None:
 # 投稿結果はすべてその中に入る。同じチャンネルに全部が流れて
 # 「いつがどの動画か分からない」状態を避けるため。
 THREAD_KEEP = 10080          # スレッドが一覧から畳まれるまで（分）＝7日。
+# `投稿` を済ませた回のスレッドはこれだけ経ったら閉じる（アーカイブ）。投稿文を
+# コピーしてTikTokに貼る時間は残しつつ、終わった回が一覧に居座らないようにする。
+# 閉じても鍵は掛けないので、中に書き込めば（`直して` 等）自動でまた開く。
+THREAD_CLOSE_AFTER = timedelta(minutes=20)
 _warned_no_thread = False    # 権限不足の警告は1回だけ出す
 # スレッドID → チャンネルに残した見出しメッセージ。回番号が決まったら書き足す。
 # スレッド名の付け替えには『スレッドの管理』権限が要ることがあるが、
@@ -360,6 +364,7 @@ async def work_thread(ch: discord.abc.Messageable, mode: str, arg: str,
     if known:
         th = await thread_for(known)
         if th is not None:
+            runner.cancel_close(th.id)      # 投稿後に手直しを頼まれたら、作業中に閉じない
             await th.send(headline or "🎬 作り直します")
             return th
     # auto/url は完成するまで回番号が分からないので仮の名前で立てて、後で付け替える
@@ -708,6 +713,13 @@ async def _do_post_inner(ch: discord.abc.Messageable, name: str, where: str, slo
 
         if errors:
             await ask_codex(ch, f"{name} の投稿準備（{where}）", "\n\n".join(errors))
+        else:
+            # 閉じるのは**投稿した回のスレッド**（`投稿` と打った場所ではない。別の回の
+            # スレッドで言われても、そちらは閉じない）。失敗した時はログを見てやり直す
+            # ため開けておく。
+            th = await thread_for(name)
+            if th is not None:
+                runner.schedule_close(th.id, datetime.now() + THREAD_CLOSE_AFTER)
 
 
 async def do_post(ch: discord.abc.Messageable, name: str, where: str, slot: str,
@@ -910,9 +922,39 @@ async def take_csv(msg: discord.Message) -> bool:
     return True
 
 
+async def close_due_threads(now: datetime) -> None:
+    """投稿から THREAD_CLOSE_AFTER 経ったスレッドを閉じる。
+
+    1本こけても時計（clock）を止めないよう、例外はここで握って log に残すだけ。
+    """
+    try:
+        due = runner.take_due_closes(now)
+    except Exception as e:  # noqa: BLE001
+        print(f"[thread] 閉じる予約を読めませんでした: {e}")
+        return
+    mins = int(THREAD_CLOSE_AFTER.total_seconds() // 60)
+    for tid in due:
+        try:
+            th = bot.get_channel(tid) or await bot.fetch_channel(tid)
+            if not isinstance(th, discord.Thread) or th.archived:
+                continue
+            await th.send(f"🗂 投稿から{mins}分たったのでスレッドを閉じます"
+                          "（ここに書き込めばまた開きます）")
+            try:
+                await th.edit(archived=True)
+            except discord.HTTPException as e:
+                # 「閉じます」と言ったまま開いて残らないよう、閉じられなかったことも言う
+                print(f"[thread] {tid} を閉じられませんでした: {e}")
+                await th.send("⚠️ スレッドを閉じられませんでした。Discordのサーバー設定で"
+                              "Botに『スレッドの管理』を許可してね")
+        except Exception as e:  # noqa: BLE001
+            print(f"[thread] {tid} を閉じられませんでした: {e}")
+
+
 @tasks.loop(seconds=30)
 async def clock() -> None:
     now = datetime.now()
+    await close_due_threads(now)
     # 週次が先。定刻がぶつかった時は分析を優先する（生成は翌朝また走る）
     if await weekly_tick(now):
         return
