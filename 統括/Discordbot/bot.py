@@ -713,9 +713,13 @@ async def _do_post_inner(ch: discord.abc.Messageable, name: str, where: str, slo
 
         if errors:
             await ask_codex(ch, f"{name} の投稿準備（{where}）", "\n\n".join(errors))
-        elif isinstance(ch, discord.Thread):
-            # 失敗した時は開けておく（ログを見てやり直すため）
-            runner.schedule_close(ch.id, datetime.now() + THREAD_CLOSE_AFTER)
+        else:
+            # 閉じるのは**投稿した回のスレッド**（`投稿` と打った場所ではない。別の回の
+            # スレッドで言われても、そちらは閉じない）。失敗した時はログを見てやり直す
+            # ため開けておく。
+            th = await thread_for(name)
+            if th is not None:
+                runner.schedule_close(th.id, datetime.now() + THREAD_CLOSE_AFTER)
 
 
 async def do_post(ch: discord.abc.Messageable, name: str, where: str, slot: str,
@@ -923,15 +927,26 @@ async def close_due_threads(now: datetime) -> None:
 
     1本こけても時計（clock）を止めないよう、例外はここで握って log に残すだけ。
     """
-    for tid in runner.take_due_closes(now):
+    try:
+        due = runner.take_due_closes(now)
+    except Exception as e:  # noqa: BLE001
+        print(f"[thread] 閉じる予約を読めませんでした: {e}")
+        return
+    mins = int(THREAD_CLOSE_AFTER.total_seconds() // 60)
+    for tid in due:
         try:
             th = bot.get_channel(tid) or await bot.fetch_channel(tid)
             if not isinstance(th, discord.Thread) or th.archived:
                 continue
-            mins = int(THREAD_CLOSE_AFTER.total_seconds() // 60)
             await th.send(f"🗂 投稿から{mins}分たったのでスレッドを閉じます"
                           "（ここに書き込めばまた開きます）")
-            await th.edit(archived=True)
+            try:
+                await th.edit(archived=True)
+            except discord.HTTPException as e:
+                # 「閉じます」と言ったまま開いて残らないよう、閉じられなかったことも言う
+                print(f"[thread] {tid} を閉じられませんでした: {e}")
+                await th.send("⚠️ スレッドを閉じられませんでした。Discordのサーバー設定で"
+                              "Botに『スレッドの管理』を許可してね")
         except Exception as e:  # noqa: BLE001
             print(f"[thread] {tid} を閉じられませんでした: {e}")
 

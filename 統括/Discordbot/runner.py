@@ -231,16 +231,23 @@ def remember(name: str, **fields) -> None:
 
 # 投稿を済ませた回のスレッドを後で閉じる予約。{スレッドID: 閉じる時刻(ISO)}。
 # Botを再起動しても忘れないよう state に置く（時計は bot.clock が30秒ごとに見る）。
+def _closes(s: dict) -> dict:
+    """state の中の閉じる予約。手で壊した等で dict でなければ空にして返す。"""
+    if not isinstance(s.get("thread_close"), dict):
+        s["thread_close"] = {}
+    return s["thread_close"]
+
+
 def schedule_close(thread_id: int, at: datetime) -> None:
     s = load_state()
-    s.setdefault("thread_close", {})[str(thread_id)] = at.isoformat(timespec="seconds")
+    _closes(s)[str(thread_id)] = at.isoformat(timespec="seconds")
     save_state(s)
 
 
 def cancel_close(thread_id: int) -> None:
     """そのスレッドでまた作業が始まった時に呼ぶ（手直し中に閉じないように）。"""
     s = load_state()
-    if s.get("thread_close", {}).pop(str(thread_id), None) is not None:
+    if _closes(s).pop(str(thread_id), None) is not None:
         save_state(s)
 
 
@@ -251,8 +258,9 @@ def take_due_closes(now: datetime) -> list[int]:
     30秒ごとに同じ失敗を繰り返さないため。壊れた値も黙って捨てる。
     """
     s = load_state()
-    pending = s.get("thread_close", {})
-    due, dropped = [], False
+    broken = not isinstance(s.get("thread_close", {}), dict)
+    pending = _closes(s)
+    due, dropped = [], broken
     for tid, at in list(pending.items()):
         try:
             if datetime.fromisoformat(at) > now:

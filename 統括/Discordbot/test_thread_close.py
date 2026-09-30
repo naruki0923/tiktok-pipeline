@@ -41,9 +41,11 @@ class ThreadCloseTest(TestCase):
             setattr(config, attr, value)
             self.addCleanup(setattr, config, attr, old)
 
-    def post(self, ch, yt_ok: bool = True) -> None:
+    def post(self, ch, yt_ok: bool = True, own=None) -> None:
+        """本番_104 を投稿する。own はその回のスレッド（無ければ None）。"""
         with patch.object(runner, "post_youtube", return_value=(yt_ok, "log")), \
                 patch.object(runner, "log_manual_tiktok"), \
+                patch.object(bot, "thread_for", AsyncMock(return_value=own)), \
                 patch.object(bot, "ask_codex", AsyncMock()):
             asyncio.run(bot._do_post_inner(ch, "本番_104", "both", "am"))
 
@@ -52,21 +54,39 @@ class ThreadCloseTest(TestCase):
 
     def test_successful_post_schedules_close_in_20_minutes(self) -> None:
         before = datetime.now()
-        self.post(a_thread(111))
+        th = a_thread(111)
+        self.post(th, own=th)
 
         at = datetime.fromisoformat(self.pending()["111"])
         self.assertAlmostEqual((at - before).total_seconds(), 20 * 60, delta=5)
 
     def test_failed_post_keeps_the_thread_open(self) -> None:
-        self.post(a_thread(111), yt_ok=False)
+        th = a_thread(111)
+        self.post(th, yt_ok=False, own=th)
 
         self.assertEqual({}, self.pending())
 
     def test_post_in_the_channel_schedules_nothing(self) -> None:
         """スレッドが無い古い回はチャンネルに直接書く。チャンネルは閉じない。"""
-        self.post(AsyncMock(spec=discord.TextChannel))
+        self.post(AsyncMock(spec=discord.TextChannel), own=None)
 
         self.assertEqual({}, self.pending())
+
+    def test_closes_the_posted_videos_thread_not_where_it_was_said(self) -> None:
+        """105のスレッドで `投稿 104` と言っても、閉じるのは104のスレッド。"""
+        self.post(a_thread(222), own=a_thread(111))
+
+        self.assertEqual(["111"], list(self.pending()))
+
+    def test_broken_schedule_does_not_break_post_or_revise(self) -> None:
+        s = runner.load_state()
+        s["thread_close"] = ["壊れた値"]
+        runner.save_state(s)
+
+        runner.cancel_close(111)
+        self.assertEqual([], runner.take_due_closes(NOW))
+        runner.schedule_close(111, NOW)
+        self.assertEqual(["111"], list(self.pending()))
 
     def test_due_threads_are_taken_once(self) -> None:
         runner.schedule_close(111, NOW - timedelta(seconds=1))
@@ -124,6 +144,11 @@ class ThreadCloseTest(TestCase):
             asyncio.run(bot.close_due_threads(NOW))     # 例外が外に出ないこと
 
         self.assertEqual({}, self.pending())
+        self.assertIn("閉じられませんでした", th.send.call_args.args[0])
+
+    def test_unreadable_schedule_does_not_stop_the_clock(self) -> None:
+        with patch.object(runner, "take_due_closes", side_effect=OSError("disk")):
+            asyncio.run(bot.close_due_threads(NOW))     # 例外が外に出ないこと
 
 
 if __name__ == "__main__":
