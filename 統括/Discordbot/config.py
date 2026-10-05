@@ -84,6 +84,13 @@ CACHE = BOT_DIR / ".cache"
 CACHE.mkdir(exist_ok=True)
 STATE = BOT_DIR / "state.json"                          # 自動実行の状態・title_lines等
 
+# --- 古い動画の掃除 ---
+# 作ってからこの日数を過ぎた完成動画・プレビュー・ナレーション音声を毎日1回消す
+# （投稿したかどうかは問わない。2026-10-05 社長判断）。0 で掃除しない。
+# 台本 txt・ログは消さないので、重複防止はそのまま効く（runner.purge_old）。
+PURGE_DAYS = int(os.environ.get("PURGE_DAYS", "30"))
+PURGE_LOG = VIDEO_DIR / "削除ログ.csv"                 # 何をいつ消したか（`投稿 040` の案内にも使う）
+
 # Discordの添付上限に収める目標サイズ（無料枠10MBに対して余裕を持たせる）
 PREVIEW_MAX_MB = 8.0
 

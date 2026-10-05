@@ -206,8 +206,51 @@ def log_post(video: Path, status: str, video_id: str = "", url: str = "",
         ])
 
 
+# 二重アップロードとみなす記録。失敗・dry-run・precheck落ちは数えない（やり直してよい）。
+UPLOADED_STATUSES = {"uploaded"}
+
+
+def uploaded_before(video: Path) -> dict | None:
+    """同じ動画を上げた記録があれば最後の1行を返す（重複アップロード防止）。"""
+    if not LOG_CSV.exists():
+        return None
+    try:
+        with LOG_CSV.open(newline="", encoding="utf-8") as f:
+            for row in reversed(list(csv.DictReader(f))):
+                if row.get("video") == video.name and row.get("status") in UPLOADED_STATUSES:
+                    return row
+    except (OSError, csv.Error):
+        # ログが一時的に読めないだけで正規の投稿を妨げない（post_tiktok.py と同じ扱い）。
+        return None
+    return None
+
+
+def rebuilt_after(video: Path, prev: dict) -> bool:
+    """上げた記録より後に動画ファイルが作り直されているか。日時が読めなければ False。"""
+    try:
+        uploaded_at = datetime.fromisoformat(prev.get("datetime") or "")
+        return video.stat().st_mtime > uploaded_at.timestamp()
+    except (ValueError, OSError):
+        return False
+
+
 def do_upload(args) -> int:
     video = args.video.resolve()
+
+    # 0) 同じ回を二度上げない。Discordで `投稿` を2回送ると予約が2本できていた。
+    #    終了コードは0にする（失敗ではないので Codex 救援を起こさない）。
+    #    文言「既にアップロード済み」は Discordbot/runner.py が見ている。
+    prev = None if args.force else uploaded_before(video)
+    if prev:
+        print(f"⏭ 既にアップロード済み: {prev.get('url', '')} "
+              f"（{prev.get('datetime', '日時不明')}）")
+        print("   二重に上げないため何もしません。どうしても上げ直す時は --force")
+        if rebuilt_after(video, prev):
+            # 文言「上げた後に作り直されています」も Discordbot/runner.py が見ている
+            print("⚠️ この動画は上げた後に作り直されています（`直して` 等）。"
+                  "YouTubeには直す前の版が上がったままです")
+        return 0
+
     caption = load_caption(args)
     title = derive_title(caption, args.title)
     description = build_description(title, args)
@@ -325,6 +368,8 @@ def main() -> int:
                     help=f"カテゴリID。既定 {DEFAULT_CATEGORY}(People & Blogs)。27=教育")
     ap.add_argument("--privacy", choices=["public", "unlisted", "private"],
                     default="public", help="即時公開時の公開範囲。既定 public")
+    ap.add_argument("--force", action="store_true",
+                    help="同じ動画を上げた記録があってもアップロードする（既定は二重アップロードを止める）")
     ap.add_argument("--publish-now", action="store_true",
                     help="予約せず即時公開（既定は翌日予約公開）")
     ap.add_argument("--schedule-time", default=DEFAULT_SCHEDULE_TIME,

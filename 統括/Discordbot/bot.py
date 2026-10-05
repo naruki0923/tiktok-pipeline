@@ -57,7 +57,7 @@ HELP = """**📱 使い方**
 
 **見る・直す**
 ・`見せて` … 直近の完成動画をもう一度送る　・`036 見せて` … 回を指定
-・`直して <どう直すか>` … 台本を手直しして動画を作り直す
+{purge_line}・`直して <どう直すか>` … 台本を手直しして動画を作り直す
 　例: `直して タイトルをもっと短く` / `036 直して 3つ目の項目を消して2つにして`
 　※直せるのは台本と動画。仕組み自体の不具合はClaudeに言ってね
 
@@ -85,6 +85,11 @@ HELP = """**📱 使い方**
 ・チャンネルに残るのは見出し1行だけ。中身はスレッドを開いてね
 ・スレッドの中で `投稿` `直して〜` とそのまま話しかけてOK
 """
+
+# 掃除の日数は .env の PURGE_DAYS で変わるので、ヘルプもそれに合わせる
+HELP = HELP.replace("{purge_line}", (
+    f"・動画は**作ってから{config.PURGE_DAYS}日で自動削除**（投稿したかは問わない）。"
+    "台本は残るので `035 作って` で作り直せる\n") if config.PURGE_DAYS > 0 else "")
 
 
 # --- 状態 -------------------------------------------------------------------
@@ -218,6 +223,13 @@ class PostButton(discord.ui.DynamicItem[discord.ui.Button],
         if runner.off_target_reason(self.vname):
             await interaction.response.defer()
             await refuse_off_target(await route(interaction.channel, self.vname), self.vname)
+            return
+        # 30日たって動画が消えた回のボタン（古いプレビューに残っている）も同じく先に断る
+        if not runner.tiktok_mp4(self.vname).exists():
+            await interaction.response.defer()
+            dest = await route(interaction.channel, self.vname)
+            if not await refuse_missing(dest, self.vname):   # 台本まで無い回でも黙らない
+                await dest.send(f"⚠️ **{self.vname}** の動画が見つからないので投稿しません")
             return
         mode = "おまかせ" if self.auto else "TikTokは手動"
         await interaction.response.send_message(
@@ -680,8 +692,16 @@ async def _do_post_inner(ch: discord.abc.Messageable, name: str, where: str, slo
 
         if where in ("youtube", "both"):
             ok, log = await asyncio.to_thread(runner.post_youtube, name, slot)
-            out.append(f"✅ YouTube: 予約完了（{yt_when}）" if ok
-                       else f"❌ YouTube: 失敗\n```\n{log[-900:]}\n```")
+            dup = runner.youtube_already(log) if ok else None
+            if dup is not None:
+                out.append(f"⏭ YouTube: この回は上げ済みなので二重には上げません {dup}".rstrip())
+                if runner.YT_REBUILT_MARK in log:
+                    out.append("⚠️ YouTube: 上げた後に作り直した動画です。**YouTubeには直す前の版が"
+                               "上がったまま**です。差し替えるなら YouTube Studio で前の版を消してから"
+                               "Claudeに上げ直しを頼んでね")
+            else:
+                out.append(f"✅ YouTube: 予約完了（{yt_when}）" if ok
+                           else f"❌ YouTube: 失敗\n```\n{log[-900:]}\n```")
             if not ok:
                 errors.append(f"YouTube投稿処理:\n{log}")
 
@@ -689,6 +709,11 @@ async def _do_post_inner(ch: discord.abc.Messageable, name: str, where: str, slo
             out.append(f"🖐 **TikTokは手動で投稿してください**（目安 {tk_when}）\n"
                        f"　動画: `{runner.tiktok_mp4(name)}`\n"
                        f"　投稿文は**次のメッセージをそのままコピー**して貼り付け")
+            # 下で今回の manual 行を書く前に見る（書いた後だと必ず「前にも渡した」になる）
+            handed = runner.tiktok_handed_on(name)
+            if handed:
+                out.append(f"⚠️ この回の投稿文は **{handed}** にも渡しています。"
+                           "TikTokに出し済みなら**貼らないでね**（同じ動画が2本並びます）")
 
         if where in ("tiktok", "both") and auto:
             out.append(f"⚠️ TikTokは予約日時がズレることがあるので、押す前に"
@@ -951,10 +976,68 @@ async def close_due_threads(now: datetime) -> None:
             print(f"[thread] {tid} を閉じられませんでした: {e}")
 
 
+_purged_day = ""        # 今日の掃除が済んだ日（state.json の purge_last の写し）
+
+
+async def purge_tick(now: datetime) -> None:
+    """1日1回、作ってから PURGE_DAYS 日たった動画を消す（runner.purge_old）。
+
+    生成・投稿の最中は消さずに次の30秒で出直す（`投稿 040` の最中に040を消さないため）。
+    失敗しても同じ日に何度も繰り返さないよう、試した時点でその日は済んだ扱いにする。
+    済んだ日はメモリに持ち、state.json を見るのは再起動後の初回だけ。
+    """
+    global _purged_day
+    if config.PURGE_DAYS <= 0 or _busy.locked():
+        return
+    today = now.strftime("%Y-%m-%d")
+    if _purged_day == today:
+        return
+    if runner.load_state().get("purge_last") == today:
+        _purged_day = today
+        return
+    async with _busy:
+        try:
+            gone = await asyncio.to_thread(runner.purge_old, now)
+        except Exception as e:  # noqa: BLE001
+            gone = []
+            print(f"[purge] 古い動画を消せませんでした: {e}")
+        s = runner.load_state()
+        s["purge_last"] = today
+        runner.save_state(s)
+        _purged_day = today
+    if gone:
+        names = sorted({name for name, _, _ in gone})
+        mb = sum(size for _, _, size in gone) / 1024 / 1024
+        print(f"[purge] {config.PURGE_DAYS}日過ぎた {len(gone)}ファイル（{mb:.0f}MB）を削除: "
+              + " ".join(names))
+
+
+async def refuse_missing(ch: discord.abc.Messageable, name: str | None) -> bool:
+    """回を指定されたのに、台本はあって動画が無ければ理由を言って True を返す。
+
+    ここで止めないと「最新の回」に黙って置き換わり、040 のつもりで 110 が出てしまう。
+    掃除で消した回（削除ログにある）も、手で消した回・作りかけの回も同じく止める。
+    台本も無い番号は回の指定ではないとみなして今までどおり（呼び出し側が最新の回を使う）。
+    """
+    if not name or runner.tiktok_mp4(name).exists() or not runner.script_txt(name).exists():
+        return False
+    num = name.split("_")[-1]
+    when = runner.purged_on(name)
+    if when:
+        why = (f"作ってから{config.PURGE_DAYS}日たったので" if config.PURGE_DAYS > 0
+               else "古くなったので") + f"消しました（{when}）"
+    else:
+        why = "見つかりません（手で消したか、まだ出来上がっていません）"
+    await ch.send(f"🗑 **{name}** の動画は{why}。\n"
+                  f"台本は残っているので `{num} 作って` で作り直せます（背景は変わることがあります）")
+    return True
+
+
 @tasks.loop(seconds=30)
 async def clock() -> None:
     now = datetime.now()
     await close_due_threads(now)
+    await purge_tick(now)
     # 週次が先。定刻がぶつかった時は分析を優先する（生成は翌朝また走る）
     if await weekly_tick(now):
         return
@@ -1133,7 +1216,7 @@ async def on_message(msg: discord.Message) -> None:
     url = re.search(r"https?://\S*tiktok\.com/\S+", text)
     # 回の番号は2〜4桁。「3つ目」「2つ」「30日」のような助数詞付きは回番号ではないので外す
     # （「036 直して 3つ目の項目を消して」で 3 を回番号と誤読しないため）
-    num = re.search(r"(?<!\d)(\d{2,4})(?![\d\s]*[つ個番回本年月日時分秒歳割万円%％:：])", text)
+    num = re.search(r"(?<![\d:：])(\d{2,4})(?![\d\s]*[つ個番回本年月日時分秒歳割万円%％:：])", text)
     name = f"本番_{int(num.group(1)):03d}" if num else None
     slot = "pm" if any(k in text for k in ("夜", "18:30", "夕方")) else "am"
 
@@ -1166,6 +1249,8 @@ async def on_message(msg: discord.Message) -> None:
 
     # 完成済みの動画をもう一度見たいとき（作り直さずプレビューだけ送る）
     if any(k in text for k in ("見せて", "見たい", "プレビュー", "確認")) and not post_kw:
+        if await refuse_missing(ch, name):
+            return
         target = name if (name and runner.tiktok_mp4(name).exists()) else runner.latest_ready()
         if not target:
             await ch.send("⚠️ まだ完成した動画がありません")
@@ -1174,6 +1259,8 @@ async def on_message(msg: discord.Message) -> None:
         return
 
     if post_kw:
+        if await refuse_missing(ch, name):
+            return
         # 「18:30に投稿」のような時刻表記を回の番号と誤読しないよう、実在する回だけ採用する
         target = name if (name and runner.tiktok_mp4(name).exists()) else runner.latest_ready()
         if not target:
