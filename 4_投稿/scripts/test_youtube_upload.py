@@ -56,6 +56,12 @@ class UploadedBeforeTest(unittest.TestCase):
         cap.assert_not_called()
         api.assert_not_called()
 
+    def test_rebuilt_after_upload(self) -> None:
+        self.video.write_bytes(b"x")
+        self.assertTrue(youtube_upload.rebuilt_after(self.video, {"datetime": "2026-01-01T06:00:00"}))
+        self.assertFalse(youtube_upload.rebuilt_after(self.video, {"datetime": "2999-01-01T06:00:00"}))
+        self.assertFalse(youtube_upload.rebuilt_after(self.video, {"datetime": ""}))
+
     def test_force_goes_ahead(self) -> None:
         self.write(["2026-10-04T06:00:00", "本番_104_YouTube.mp4", "uploaded",
                     "abc", "https://youtu.be/abc", "", "t"])

@@ -225,6 +225,15 @@ def uploaded_before(video: Path) -> dict | None:
     return None
 
 
+def rebuilt_after(video: Path, prev: dict) -> bool:
+    """上げた記録より後に動画ファイルが作り直されているか。日時が読めなければ False。"""
+    try:
+        uploaded_at = datetime.fromisoformat(prev.get("datetime") or "")
+        return video.stat().st_mtime > uploaded_at.timestamp()
+    except (ValueError, OSError):
+        return False
+
+
 def do_upload(args) -> int:
     video = args.video.resolve()
 
@@ -236,6 +245,10 @@ def do_upload(args) -> int:
         print(f"⏭ 既にアップロード済み: {prev.get('url', '')} "
               f"（{prev.get('datetime', '日時不明')}）")
         print("   二重に上げないため何もしません。どうしても上げ直す時は --force")
+        if rebuilt_after(video, prev):
+            # 文言「上げた後に作り直されています」も Discordbot/runner.py が見ている
+            print("⚠️ この動画は上げた後に作り直されています（`直して` 等）。"
+                  "YouTubeには直す前の版が上がったままです")
         return 0
 
     caption = load_caption(args)

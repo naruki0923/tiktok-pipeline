@@ -208,6 +208,32 @@ def log_manual_tiktok(name: str, caption: str) -> bool:
         return False   # ログが書けないだけで投稿文の受け渡しは止めない
 
 
+# post_tiktok.py の CONFIRMED_STATUSES（おまかせで確定まで押せた）と、手動投稿の manual。
+# どちらかがあれば「この回はもうTikTokに出ている（か、出すために渡した）」とみなす。
+# post_tiktok.py は別の venv なので import せず写している。ずれは test_purge.py が見張る。
+TIKTOK_DONE_STATUSES = {MANUAL_STATUS, "予約_auto", "投稿_auto", "予約_semi_auto", "投稿_semi_auto"}
+
+
+def tiktok_handed_on(name: str) -> str | None:
+    """その回の投稿文を前に渡した（または投稿を確定した）日。無ければ None。
+
+    消えた回を作り直して `投稿` すると、手動投稿では投稿文をもう一度渡すことになる。
+    YouTube のように止めはしない（出し直しが要る場合もある）が、黙って渡すと
+    TikTok に同じ動画が2本並ぶので、前に渡した日を添えて気づけるようにする。
+    """
+    if not config.POST_LOG.exists():
+        return None
+    try:
+        with config.POST_LOG.open(newline="", encoding="utf-8") as f:
+            for row in reversed(list(csv.DictReader(f))):
+                if row.get("video") == f"{name}_TikTok.mp4" \
+                        and row.get("status") in TIKTOK_DONE_STATUSES:
+                    return (row.get("datetime") or "")[:10] or "日付不明"
+    except (OSError, csv.Error):
+        return None
+    return None
+
+
 # --- 状態（title_lines 等の持ち回り） --------------------------------------
 def load_state() -> dict:
     if config.STATE.exists():
@@ -513,6 +539,8 @@ def post_youtube(name: str, slot: str = "am") -> tuple[bool, str]:
 
 # youtube_upload.py が「同じ回は上げ済み」で何もせず終えた時に出す印（終了コードは0）
 YT_ALREADY_MARK = "既にアップロード済み"
+# そのうえで、上げた後に `直して` で作り直した動画だった時の印（直した版は上がっていない）
+YT_REBUILT_MARK = "上げた後に作り直されています"
 
 
 def youtube_already(log: str) -> str | None:
@@ -704,7 +732,8 @@ def purge_old(now: datetime | None = None, days: int | None = None) -> list[tupl
     days = config.PURGE_DAYS if days is None else days
     if days <= 0:
         return []
-    cutoff = ((now or datetime.now()) - timedelta(days=days)).timestamp()
+    now = now or datetime.now()
+    cutoff = (now - timedelta(days=days)).timestamp()
     gone: list[tuple[str, Path, int]] = []
     for folder, pattern in purge_globs():
         if not folder.exists():
@@ -720,11 +749,11 @@ def purge_old(now: datetime | None = None, days: int | None = None) -> list[tupl
                 continue
             gone.append((_video_name(p), p, st.st_size))
     if gone:
-        _log_purge(gone)
+        _log_purge(gone, now)
     return gone
 
 
-def _log_purge(gone: list[tuple[str, Path, int]]) -> None:
+def _log_purge(gone: list[tuple[str, Path, int]], now: datetime) -> None:
     try:
         config.PURGE_LOG.parent.mkdir(parents=True, exist_ok=True)
         new_file = not config.PURGE_LOG.exists()
@@ -732,7 +761,7 @@ def _log_purge(gone: list[tuple[str, Path, int]]) -> None:
             w = csv.writer(f)
             if new_file:
                 w.writerow(["datetime", "video", "file", "bytes"])
-            stamp = datetime.now().isoformat(timespec="seconds")
+            stamp = now.isoformat(timespec="seconds")
             for name, p, size in gone:
                 w.writerow([stamp, name, p.name, size])
     except OSError as e:
