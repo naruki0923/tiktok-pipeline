@@ -511,6 +511,19 @@ def post_youtube(name: str, slot: str = "am") -> tuple[bool, str]:
     )
 
 
+# youtube_upload.py が「同じ回は上げ済み」で何もせず終えた時に出す印（終了コードは0）
+YT_ALREADY_MARK = "既にアップロード済み"
+
+
+def youtube_already(log: str) -> str | None:
+    """上げ済みで飛ばした時はその URL（分からなければ空文字）、上げた時は None。"""
+    for line in log.splitlines():
+        if YT_ALREADY_MARK in line:
+            m = re.search(r"https://\S+", line)
+            return m.group(0) if m else ""
+    return None
+
+
 # --- 週次レビュー -----------------------------------------------------------
 WEEKLY_TIMEOUT = 1800     # CSV読み込み＋LLM1回ぶん（ブラウザはもう開かない）
 
@@ -656,3 +669,88 @@ def latest_ready() -> str | None:
     """投稿できる状態の最新の動画名（TikTok版mp4がある中で番号が一番大きいもの）。"""
     names = sorted(p.stem.replace("_TikTok", "") for p in config.OUTPUT_DIR.glob("本番_*_TikTok.mp4"))
     return names[-1] if names else None
+
+
+# --- 古い動画の掃除 ---------------------------------------------------------
+# 完成動画は1本120MB（TikTok版＋YouTube版）で、放っておくと月に3.5GBずつ溜まる。
+# 作ってから PURGE_DAYS 日たった重いファイルだけを消す（投稿したかどうかは問わない。
+# 2026-10-05 社長判断）。台本 txt・タイミング json・各種ログは残すので、連番・
+# 参考動画の30日再利用禁止・角度の重複判定・二重投稿防止は今までどおり効く。
+# 消した動画は txt から `NNN 作って` で作り直せる（背景は変わることがある）。
+
+def purge_globs() -> list[tuple[Path, str]]:
+    """消してよい重いファイルの場所と形。ここに無いものは決して消さない。"""
+    return [
+        (config.OUTPUT_DIR, "本番_*.mp4"),          # 完成動画（TikTok版・YouTube版）
+        (config.CACHE, "*_preview.mp4"),            # Discord用の縮小プレビュー
+        (config.CACHE, "*_title.jpg"),              # タイトルカードの静止画
+        (config.SCRIPT_TXT_DIR, "本番_*.wav"),      # ナレーション（txtから作り直せる）
+        (config.SCRIPT_TXT_DIR, "本番_*.mp3"),
+    ]
+
+
+def _video_name(path: Path) -> str:
+    """本番_075_TikTok.mp4 → 本番_075。回に紐づかない名前はそのまま返す。"""
+    m = re.match(r"本番_\d+", path.name)
+    return m.group(0) if m else path.stem
+
+
+def purge_old(now: datetime | None = None, days: int | None = None) -> list[tuple[str, Path, int]]:
+    """作ってから days 日を過ぎたファイルを消し、(回, パス, バイト数) の一覧を返す。
+
+    「作ってから」はファイルの更新時刻で見る（`直して` で作り直した動画はその日から数え直す）。
+    1つ消せなくても残りは続け、消せたものだけ PURGE_LOG に残す。
+    """
+    days = config.PURGE_DAYS if days is None else days
+    if days <= 0:
+        return []
+    cutoff = ((now or datetime.now()) - timedelta(days=days)).timestamp()
+    gone: list[tuple[str, Path, int]] = []
+    for folder, pattern in purge_globs():
+        if not folder.exists():
+            continue
+        for p in sorted(folder.glob(pattern)):
+            try:
+                st = p.stat()
+                if not p.is_file() or st.st_mtime >= cutoff:
+                    continue
+                p.unlink()
+            except OSError as e:
+                print(f"[purge] {p} を消せませんでした: {e}")
+                continue
+            gone.append((_video_name(p), p, st.st_size))
+    if gone:
+        _log_purge(gone)
+    return gone
+
+
+def _log_purge(gone: list[tuple[str, Path, int]]) -> None:
+    try:
+        config.PURGE_LOG.parent.mkdir(parents=True, exist_ok=True)
+        new_file = not config.PURGE_LOG.exists()
+        with config.PURGE_LOG.open("a", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            if new_file:
+                w.writerow(["datetime", "video", "file", "bytes"])
+            stamp = datetime.now().isoformat(timespec="seconds")
+            for name, p, size in gone:
+                w.writerow([stamp, name, p.name, size])
+    except OSError as e:
+        print(f"[purge] 削除ログを書けませんでした: {e}")   # 消した事実は変わらないので止めない
+
+
+def purged_on(name: str) -> str | None:
+    """その回の完成動画を掃除で消した日（YYYY-MM-DD）。消していなければ None。
+
+    `投稿 040` の 040 が消えた回なのか、時刻表記の読み違いなのかを見分けるのに使う。
+    """
+    if not config.PURGE_LOG.exists():
+        return None
+    try:
+        with config.PURGE_LOG.open(newline="", encoding="utf-8") as f:
+            for row in reversed(list(csv.DictReader(f))):
+                if row.get("file") == tiktok_mp4(name).name:
+                    return (row.get("datetime") or "")[:10] or "日付不明"
+    except (OSError, csv.Error):
+        return None
+    return None

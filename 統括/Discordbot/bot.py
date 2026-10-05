@@ -57,6 +57,7 @@ HELP = """**📱 使い方**
 
 **見る・直す**
 ・`見せて` … 直近の完成動画をもう一度送る　・`036 見せて` … 回を指定
+・動画は**作ってから30日で自動削除**（投稿したかは問わない）。台本は残るので `035 作って` で作り直せる
 ・`直して <どう直すか>` … 台本を手直しして動画を作り直す
 　例: `直して タイトルをもっと短く` / `036 直して 3つ目の項目を消して2つにして`
 　※直せるのは台本と動画。仕組み自体の不具合はClaudeに言ってね
@@ -680,8 +681,12 @@ async def _do_post_inner(ch: discord.abc.Messageable, name: str, where: str, slo
 
         if where in ("youtube", "both"):
             ok, log = await asyncio.to_thread(runner.post_youtube, name, slot)
-            out.append(f"✅ YouTube: 予約完了（{yt_when}）" if ok
-                       else f"❌ YouTube: 失敗\n```\n{log[-900:]}\n```")
+            dup = runner.youtube_already(log) if ok else None
+            if dup is not None:
+                out.append(f"⏭ YouTube: この回は上げ済みなので二重には上げません {dup}".rstrip())
+            else:
+                out.append(f"✅ YouTube: 予約完了（{yt_when}）" if ok
+                           else f"❌ YouTube: 失敗\n```\n{log[-900:]}\n```")
             if not ok:
                 errors.append(f"YouTube投稿処理:\n{log}")
 
@@ -951,10 +956,55 @@ async def close_due_threads(now: datetime) -> None:
             print(f"[thread] {tid} を閉じられませんでした: {e}")
 
 
+async def purge_tick(now: datetime) -> None:
+    """1日1回、作ってから PURGE_DAYS 日たった動画を消す（runner.purge_old）。
+
+    生成・投稿の最中は消さずに次の30秒で出直す（`投稿 040` の最中に040を消さないため）。
+    失敗しても同じ日に何度も繰り返さないよう、試した時点でその日は済んだ扱いにする。
+    """
+    if config.PURGE_DAYS <= 0 or _busy.locked():
+        return
+    today = now.strftime("%Y-%m-%d")
+    if runner.load_state().get("purge_last") == today:
+        return
+    async with _busy:
+        try:
+            gone = await asyncio.to_thread(runner.purge_old, now)
+        except Exception as e:  # noqa: BLE001
+            gone = []
+            print(f"[purge] 古い動画を消せませんでした: {e}")
+        s = runner.load_state()
+        s["purge_last"] = today
+        runner.save_state(s)
+    if gone:
+        names = sorted({name for name, _, _ in gone})
+        mb = sum(size for _, _, size in gone) / 1024 / 1024
+        print(f"[purge] {config.PURGE_DAYS}日過ぎた {len(gone)}ファイル（{mb:.0f}MB）を削除: "
+              + " ".join(names))
+
+
+async def refuse_purged(ch: discord.abc.Messageable, name: str | None) -> bool:
+    """回を指定されたのに、その動画が掃除で消えていたら案内して True を返す。
+
+    ここで止めないと「最新の回」に黙って置き換わり、040 のつもりで 110 が出てしまう。
+    """
+    if not name or runner.tiktok_mp4(name).exists():
+        return False
+    when = runner.purged_on(name)
+    if not when:
+        return False
+    num = name.split("_")[-1]
+    await ch.send(f"🗑 **{name}** の動画は作ってから{config.PURGE_DAYS}日たったので"
+                  f"消しました（{when}）。\n"
+                  f"台本は残っているので `{num} 作って` で作り直せます（背景は変わることがあります）")
+    return True
+
+
 @tasks.loop(seconds=30)
 async def clock() -> None:
     now = datetime.now()
     await close_due_threads(now)
+    await purge_tick(now)
     # 週次が先。定刻がぶつかった時は分析を優先する（生成は翌朝また走る）
     if await weekly_tick(now):
         return
@@ -1166,6 +1216,8 @@ async def on_message(msg: discord.Message) -> None:
 
     # 完成済みの動画をもう一度見たいとき（作り直さずプレビューだけ送る）
     if any(k in text for k in ("見せて", "見たい", "プレビュー", "確認")) and not post_kw:
+        if await refuse_purged(ch, name):
+            return
         target = name if (name and runner.tiktok_mp4(name).exists()) else runner.latest_ready()
         if not target:
             await ch.send("⚠️ まだ完成した動画がありません")
@@ -1174,6 +1226,8 @@ async def on_message(msg: discord.Message) -> None:
         return
 
     if post_kw:
+        if await refuse_purged(ch, name):
+            return
         # 「18:30に投稿」のような時刻表記を回の番号と誤読しないよう、実在する回だけ採用する
         target = name if (name and runner.tiktok_mp4(name).exists()) else runner.latest_ready()
         if not target:

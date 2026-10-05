@@ -136,7 +136,10 @@ TikTokと違い **公式APIなので規約クリーン・UI変更で壊れない
 ```
 主なオプション: `--title` / `--description(-file)` / `--footer-file`(CTA/リンク) /
 `--category`(既定22 People&Blogs, 27=教育) / `--privacy` / `--publish-now` /
-`--schedule-time HH:MM(JST)` / `--schedule-days N` / `--dry-run`
+`--schedule-time HH:MM(JST)` / `--schedule-days N` / `--dry-run` / `--force`
+
+- **二重アップロード防止**: 同じファイル名を `uploaded` で上げた記録が `youtube_log.csv` にあれば、
+  何もせず終える（終了コード0・「既にアップロード済み」と表示）。上げ直す時だけ `--force`。
 
 - **タイトル**: 未指定なら先頭の【…】か冒頭文＋`#Shorts`（100字以内）。
 - **予約公開**: 仕様上 `private` で登録し、指定時刻(JST)に自動公開（`publishAt`）。
