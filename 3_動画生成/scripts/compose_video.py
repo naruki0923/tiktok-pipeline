@@ -14,7 +14,7 @@ TikTok用（BGMなし）と YouTube用（BGMあり）の2本を書き出す。
   ./.venv/bin/python compose_video.py \
       --audio ../音声/narration_001.wav \
       --timing ../音声/narration_001.timing.json \
-      --bg "/Volumes/Extreme SSD/素材/動画・画像素材/4K 散歩動画/【4K】平日の新宿をのんびり散歩【Tokyo Walk】.mp4" \
+      --bg "$HOME/Desktop/4K 散歩動画/【4K】平日の新宿をのんびり散歩【Tokyo Walk】.mp4" \
       --out-dir ../output --name 動画_test_001 \
       --bgm ../assets/BGM/*.mp3 \
       --red-lines 1
@@ -563,7 +563,7 @@ def main():
 
     for clip in args.bg:
         if not os.path.exists(clip):
-            print(f"[エラー] 背景動画が見つかりません: {clip}\n  （外付けSSDが接続されているか確認）", file=sys.stderr)
+            print(f"[エラー] 背景動画が見つかりません: {clip}\n  （素材フォルダが移動されているか確認）", file=sys.stderr)
             sys.exit(1)
     os.makedirs(args.out_dir, exist_ok=True)
 

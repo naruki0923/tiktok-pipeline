@@ -125,8 +125,8 @@ def main() -> None:
     # exists() では足りない。フォルダはあるのに**中を読む時だけ**macOSの許可待ちで
     # 固まることがある（2026-09-10、それで6本ぶん落とした）。実際に読んで確かめる。
     bg = runner.bg_dir_problem()
-    check("背景動画（外付けSSD）を読める", bg is None,
-          (bg or "").replace("\n", " ")[:200] or "外付けSSD「Extreme SSD」を繋ぐ")
+    check("背景動画を読める", bg is None,
+          (bg or "").replace("\n", " ")[:200] or "~/Desktop/4K 散歩動画 があるか確認する")
     if bg is None:
         print("  ※ これはターミナルから見た結果です。launchd で常駐しているBotは"
               "別扱いなので、\n    Botだけが読めない時は下のパスに"

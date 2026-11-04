@@ -13,7 +13,7 @@ cd 3_動画生成/scripts
 ```
 → `output/本番_013_TikTok.mp4`（BGMなし）と `output/本番_013_YouTube.mp4`（BGMあり）ができる。
 
-前提: **VOICEVOX.app を起動**／**外付けSSD「Extreme SSD」を接続**。
+前提: **VOICEVOX.app を起動**／**背景素材 `~/Desktop/4K 散歩動画` がある**。
 オプションや仕組みの詳細は [scripts/README.md](scripts/README.md)。
 
 以下は、この自動化が何をやっているか（＝Premiere Proでの手作業の内容）の説明。

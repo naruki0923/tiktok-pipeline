@@ -66,7 +66,7 @@ cd 統括/LINEbot
 ```
 起動ログに公開URLと「LINE webhook 自動登録」が出ればOK。あとはスマホのLINEで「021 作って」と送るだけ。
 
-前提: **VOICEVOX.app 起動中／外付けSSD「Extreme SSD」接続**（動画生成の依存）。
+前提: **VOICEVOX.app 起動中／背景素材 `~/Desktop/4K 散歩動画` がある**（動画生成の依存）。
 
 ## 動作確認（トークン不要のロジックテスト）
 ```bash

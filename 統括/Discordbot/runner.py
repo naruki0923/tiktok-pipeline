@@ -370,7 +370,7 @@ def title_problems(name: str, title_lines: int | None = None) -> list[str]:
 
 
 def make_video(name: str) -> tuple[bool, str]:
-    """台本 name.txt から TikTok/YouTube 2本を生成。VOICEVOX+SSDが前提。
+    """台本 name.txt から TikTok/YouTube 2本を生成。VOICEVOXが前提。
 
     レンダリング前に必ず title_problems() で止める。**タイトルは一番壊れやすく、
     壊れたまま出来上がると人が気づくまで分からない**ので、作らせない方が安全。
@@ -398,7 +398,7 @@ def make_video(name: str) -> tuple[bool, str]:
     return ok, log
 
 
-# 背景素材（外付けSSD）が読めるかの下見にかける制限時間。
+# 背景素材が読めるかの下見にかける制限時間。
 # 読めれば0.1秒で終わる処理なので、これを超えたら「待たされている」と断じてよい。
 BG_CHECK_TIMEOUT = 25
 
@@ -427,10 +427,10 @@ def bg_dir_problem() -> str | None:
                            cwd=str(config.VIDEO_SCRIPTS), capture_output=True,
                            text=True, timeout=BG_CHECK_TIMEOUT)
     except subprocess.TimeoutExpired:
-        return ("🚫 背景素材（外付けSSD）の中を読めませんでした"
+        return ("🚫 背景素材の中を読めませんでした"
                 f"（{BG_CHECK_TIMEOUT}秒待っても返事なし）。動画は作らずに止めます。\n\n"
-                "macOSの「取り外し可能なボリューム」の許可待ちで固まっている可能性が高いです。\n"
-                "・画面に『Pythonが取り外し可能なボリュームのファイルに"
+                "macOSのアクセス許可待ちで固まっている可能性が高いです。\n"
+                "・画面に『Pythonが“デスクトップ”フォルダのファイルに"
                 "アクセスしようとしています』というダイアログが出ていたら"
                 "【許可】を押してください\n"
                 "・無人でも動くようにするなら、システム設定 → プライバシーとセキュリティ →\n"
@@ -439,7 +439,7 @@ def bg_dir_problem() -> str | None:
     except OSError as e:
         return f"🚫 背景素材の確認を実行できません: {e}"
     if p.returncode != 0:
-        return ("🚫 背景素材（外付けSSD）が使えません。動画は作らずに止めます。\n"
+        return ("🚫 背景素材が使えません。動画は作らずに止めます。\n"
                 f"```\n{((p.stdout or '') + (p.stderr or '')).strip()[-800:]}\n```")
     return None
 

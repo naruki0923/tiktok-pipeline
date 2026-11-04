@@ -602,7 +602,7 @@ async def do_make(ch: discord.abc.Messageable, mode: str, arg: str = "",
         log = make_logger(th, asyncio.get_running_loop())
         # 背景素材が読めるかを先に見る。読めないまま進むと、リサーチ〜台本を
         # 使い切ったあげく合成の直前で2時間固まる（2026-09-10に6本ぶん全滅）。
-        # これは人がやること（SSDを挿す／許可を押す）なので作り直しはしない。
+        # これは人がやること（素材を戻す／許可を押す）なので作り直しはしない。
         problem = await asyncio.to_thread(runner.bg_dir_problem)
         if problem:
             await send(th, problem)
