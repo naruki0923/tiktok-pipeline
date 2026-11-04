@@ -19,13 +19,13 @@ import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-DEFAULT_BG_DIR = Path("/Volumes/Extreme SSD/素材/動画・画像素材/4K 散歩動画")
+DEFAULT_BG_DIR = Path.home() / "Desktop" / "4K 散歩動画"
 VIDEO_EXTS = {".mp4", ".mov", ".m4v"}
 PROBE_CACHE = HERE / ".bg_probe_cache.json"
 
 
 def probe_durations(clips):
-    """各クリップの尺(秒)を返す。ffprobe は遅い（4GB級・外付けSSD）ので
+    """各クリップの尺(秒)を返す。ffprobe は遅い（4GB級）ので
     パス+サイズ+更新時刻をキーにキャッシュする。"""
     try:
         cache = json.loads(PROBE_CACHE.read_text(encoding="utf-8"))
@@ -67,7 +67,7 @@ def pick_backgrounds(bg_dir: Path, seed, min_secs: float):
     """
     if not bg_dir.is_dir():
         sys.exit(f"[エラー] 背景動画フォルダが見つかりません: {bg_dir}\n"
-                 f"  外付けSSD「Extreme SSD」が接続されているか確認してください。"
+                 f"  素材フォルダを移動・改名していないか確認してください。"
                  f"（--bg-dir / --bg で別の場所も指定できます）")
     clips = sorted(p for p in bg_dir.iterdir()
                    if p.suffix.lower() in VIDEO_EXTS and not p.name.startswith("."))
@@ -149,7 +149,7 @@ def main():
     args, compose_args = ap.parse_known_args()
 
     # 背景素材を読めるかだけ見る。**音声を作る前に呼べる**ようにここに置く。
-    # 外付けSSDが外れている・macOSの「リムーバブルボリューム」の許可待ちで
+    # 素材フォルダが無い・macOSのアクセス許可待ちで
     # 固まる、といった事故を、2時間かけずに数秒で見つけるため（2026-09-10）。
     if args.check_bg:
         bgs = pick_backgrounds(Path(args.bg_dir), args.seed, args.min_bg_secs)

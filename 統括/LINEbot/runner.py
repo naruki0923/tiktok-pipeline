@@ -72,7 +72,7 @@ def youtube_mp4(name: str) -> Path:
 
 # --- 動画生成 -------------------------------------------------------------
 def make_video(name: str) -> tuple[bool, str]:
-    """台本 name.txt から TikTok/YouTube 2本を生成。VOICEVOX+SSDが前提。"""
+    """台本 name.txt から TikTok/YouTube 2本を生成。VOICEVOXが前提。"""
     txt = script_txt(name)
     if not txt.exists():
         return False, f"台本が無い: {txt.name}（先にClaudeで台本を作って {config.SCRIPT_TXT_DIR} に置いてね）"

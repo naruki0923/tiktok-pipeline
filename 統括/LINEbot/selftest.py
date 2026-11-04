@@ -114,7 +114,7 @@ assert scheduler.load()["enabled"] is False
 assert "オフ" in reply_text()
 print("5c 自動オフ OK")
 
-# 6) 自動発火（生成はモックしてVOICEVOX/SSD不要に）。プレビューまで届くか
+# 6) 自動発火（生成はモックしてVOICEVOX/背景素材不要に）。プレビューまで届くか
 server.USER_ID = "u1"
 runner.make_video = lambda name: (True, "")
 scheduler.next_script = lambda: "本番_021"   # 完成済み動画で代用
