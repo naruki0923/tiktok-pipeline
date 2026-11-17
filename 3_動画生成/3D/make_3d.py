@@ -30,6 +30,7 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 import voicevox_tts as vv  # noqa: E402
+from make_video import find_bgm  # noqa: E402
 from telop_render import _mask_money  # noqa: E402
 
 BLENDER = os.environ.get("BLENDER", "/Applications/Blender.app/Contents/MacOS/Blender")
@@ -445,7 +446,7 @@ def main():
     outdir.mkdir(parents=True, exist_ok=True)
     tk_tmp, yt_tmp = work / f"{name}_TikTok.mp4", work / f"{name}_YouTube.mp4"
     finish(segs, silent, wav, total, tk_tmp)
-    bgm = next(iter(sorted(p for p in BGM_DIR.glob("*.mp3") if not p.name.startswith("."))), None)
+    bgm = find_bgm(BGM_DIR)                     # 旧形式と同じ選び方
     finish(segs, silent, wav, total, yt_tmp, bgm=bgm)
     # 2本とも出来てから置き場へ移す（途中で落ちた時に半端な mp4 を投稿させない）
     tk, yt = outdir / tk_tmp.name, outdir / yt_tmp.name

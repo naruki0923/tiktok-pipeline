@@ -548,6 +548,19 @@ async def send_preview(ch: discord.abc.Messageable, name: str, head: str,
 
 
 # --- 仕事 -------------------------------------------------------------------
+_VIDEO_CTX = " の動画生成"
+
+
+def video_context(name: str) -> str:
+    """動画にする所で落ちた時の文脈。作り直しはこの回の台本から（retry_target で取り出す）。"""
+    return f"{name}{_VIDEO_CTX}"
+
+
+def retry_target(context: str) -> str | None:
+    """video_context の回番号。台本づくりより前で落ちた時は None（最初からやり直す）。"""
+    return context[: -len(_VIDEO_CTX)] if context.endswith(_VIDEO_CTX) else None
+
+
 async def make_once(th: discord.abc.Messageable, mode: str, arg: str,
                     log) -> tuple[dict | None, str, str]:
     """動画を1本ぶん作る（1回だけ）。
@@ -572,8 +585,11 @@ async def make_once(th: discord.abc.Messageable, mode: str, arg: str,
             ok, vlog = await asyncio.to_thread(runner.make_video, arg)
             if not ok:
                 await send(th, f"❌ {arg} の生成に失敗\n```\n{vlog[-1200:]}\n```")
-                return None, f"{arg} の動画生成", vlog
+                return None, video_context(arg), vlog
             res = {"name": arg, "title": "", "angle": ""}
+    except pipeline.VideoFailed as e:
+        await send(th, f"❌ {e}")
+        return None, video_context(e.name), str(e)
     except pipeline.PipelineError as e:
         await send(th, f"❌ {e}")
         return None, f"動画作成（{mode}）", str(e)
@@ -619,6 +635,9 @@ async def do_make(ch: discord.abc.Messageable, mode: str, arg: str = "",
                 await th.send(f"🛑 {attempt + 1}回試したのでいったん止めます。"
                               "直っていそうなら `作って` でもう一度動かしてね")
                 return
+            # 台本まで出来ていたら、作り直しはその台本から（リサーチ・台本づくりをやり直さない）
+            if (name := retry_target(context)) and runner.script_txt(name).exists():
+                mode, arg = "name", name
             note = await asyncio.to_thread(reload_code, changed) if changed else ""
             if note:
                 await send(th, note)

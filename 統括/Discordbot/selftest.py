@@ -134,7 +134,7 @@ def main() -> None:
               "別扱いなので、\n    Botだけが読めない時は下のパスに"
               "フルディスクアクセスを与えてください:")
         print(f"    {runner._base_python()}")
-    if config.VIDEO_STYLE != "classic":
+    if config.VIDEO_STYLE != "classic" and config.VIDEO_PY.exists():
         # 毎朝の既定は3D（もしも型）。Blender・Mixamo素材・空き容量のどれかが欠けると
         # 毎日旧形式に落ちる（作れはするので気づきにくい）
         p3 = subprocess.run([str(config.VIDEO_PY), str(config.MAKE_3D), "--check"],

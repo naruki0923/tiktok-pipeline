@@ -41,6 +41,18 @@ class PipelineError(RuntimeError):
     """通しの途中で進めなくなった。理由をそのままDiscordに出す。"""
 
 
+class VideoFailed(PipelineError):
+    """台本までは出来て、動画にする所で失敗した。作り直しは台本を使い回す（name に回番号）。
+
+    リサーチからやり直すと、3Dは1回で最大2時間超かかるうえ、そのたびに参考動画
+    （30日ロック）と本番番号を1つずつ使ってしまうため。
+    """
+
+    def __init__(self, name: str, message: str):
+        super().__init__(message)
+        self.name = name
+
+
 def _run(cmd: list[str], cwd: Path, timeout: int) -> subprocess.CompletedProcess:
     """caffeinate 配下のコマンドを実行し、時間切れなら子プロセスも止める。"""
     # caffeinate で包む（無人実行中のスリープ対策。理由は runner._run のコメント）。
@@ -208,7 +220,7 @@ def run_auto(log: Log) -> dict:
         report_facts(res, log)
         ok, vlog = make(name, log)
         if not ok:
-            raise PipelineError(f"{name} の動画生成に失敗\n```\n{vlog[-900:]}\n```")
+            raise VideoFailed(name, f"{name} の動画生成に失敗\n```\n{vlog[-900:]}\n```")
         return {"name": name, "title": res.get("title", ""), "angle": res.get("angle", ""),
                 "caption": res.get("caption", ""), "ref_url": cand["url"]}
 
@@ -249,7 +261,7 @@ def run_revise(name: str, instruction: str, log: Log) -> dict:
         log(f"⚠️ {w}")
     ok, vlog = make(name, log, verb="動画を作り直しています")
     if not ok:
-        raise PipelineError(f"{name} の作り直しに失敗\n```\n{vlog[-900:]}\n```")
+        raise VideoFailed(name, f"{name} の作り直しに失敗\n```\n{vlog[-900:]}\n```")
     return {"name": name, "title": res.get("title", ""), "angle": res.get("note", "")}
 
 
@@ -270,6 +282,6 @@ def run_from_url(url: str, log: Log) -> dict:
     report_facts(res, log)
     ok, vlog = make(name, log)
     if not ok:
-        raise PipelineError(f"{name} の動画生成に失敗\n```\n{vlog[-900:]}\n```")
+        raise VideoFailed(name, f"{name} の動画生成に失敗\n```\n{vlog[-900:]}\n```")
     return {"name": name, "title": res.get("title", ""), "angle": res.get("angle", ""),
             "caption": res.get("caption", ""), "ref_url": url}

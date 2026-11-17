@@ -74,6 +74,22 @@ class DoMakeRetryTest(IsolatedAsyncioTestCase):
         # コードが直っていない＝TikTok側の一時制限などなので、間を空けてから試す
         self.assertEqual(bot.asyncio.sleep.await_count, config.AUTO_RETRY_MAX)
 
+    async def test_video_failure_retries_from_the_script(self):
+        """台本まで出来て動画で落ちた時は、リサーチからではなくその台本で作り直す。"""
+        results = [(None, bot.video_context("本番_150"), "Blender NG"),
+                   ({"name": "本番_150", "title": "t"}, "", "")]
+        with (patch.object(bot, "make_once", AsyncMock(side_effect=results)) as once,
+              patch.object(bot, "ask_codex", AsyncMock(return_value=(False, []))),
+              patch.object(bot.runner, "script_txt", return_value=Path(__file__)),
+              patch.object(bot, "send_preview", AsyncMock())):
+            await bot.do_make(self.th, "auto")
+        self.assertEqual(once.await_args_list[0].args[1:3], ("auto", ""))
+        self.assertEqual(once.await_args_list[1].args[1:3], ("name", "本番_150"))
+
+    def test_retry_target(self):
+        self.assertEqual(bot.retry_target(bot.video_context("本番_150")), "本番_150")
+        self.assertIsNone(bot.retry_target("動画作成（auto）"))
+
     async def test_does_not_retry_when_a_human_must_act(self):
         """台本が無い等（文脈が空）は作り直しても同じなので1回で止める。"""
         with (patch.object(bot, "make_once", AsyncMock(return_value=(None, "", ""))) as once,

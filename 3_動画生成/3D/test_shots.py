@@ -50,6 +50,27 @@ class BuildSpecTest(unittest.TestCase):
             _, errors, _ = shots.build_spec(s, "x")
             self.assertTrue(any("書かない言い回し" in e for e in errors), line)
 
+    def test_punctuation_in_say_splits_lines(self):
+        s = src()
+        s["segments"][1]["say"] = ["退職して1日目、収入がゼロなので", "保険料もゼロ円です。"]
+        spec, errors, _ = shots.build_spec(s, "x")
+        self.assertEqual(errors, [])
+        seg = [x for x in spec["segments"] if x["part"] == "ideal"][0]
+        self.assertEqual(seg["say"], ["退職して1日目", "収入がゼロなので", "保険料もゼロ円です"])
+        self.assertNotIn("。。", shots.script_text(spec))
+
+    def test_hook_with_comma_becomes_too_many_lines(self):
+        s = src()
+        s["segments"][0]["say"] = ["もし退職後、国保が", "今の収入で、決まったら"]
+        _, errors, _ = shots.build_spec(s, "x")
+        self.assertTrue(any("フックは2〜3行" in e for e in errors))
+
+    def test_morning_scene_is_not_banned(self):
+        s = src()
+        s["segments"][2]["say"] = ["毎朝ゆっくり起きられます"]
+        _, errors, _ = shots.build_spec(s, "x")
+        self.assertEqual(errors, [])
+
     def test_cta_written_by_llm_is_error(self):
         s = src()
         s["segments"][-1]["say"] = ["このアカウントをフォローして"]

@@ -29,11 +29,13 @@ CTA_SAY = ["申請方法を詳しく知りたい人は",
 # 書かせない言い回し（もしも型では入れないと社長が決めた。2026-11-16）
 BANNED = [
     (re.compile(r"いいね|保存して|二度と.{0,8}表示されない|おすすめには表示"), "いいね保存の誘導"),
-    (re.compile(r"毎朝|この時間に|お金の話は"), "中盤フォローの誘導"),
+    # 「毎朝ゆっくり起きられる」のような描写は弾かない。投稿の時間を告げる言い回しだけ
+    (re.compile(r"毎朝.{0,12}(この時間|投稿|配信|お届け|更新)|お金の話は.{0,6}毎朝"), "中盤フォローの誘導"),
     (re.compile(r"必ずもらえ|絶対に?もらえ|誰でももらえ|100%"), "断定・誇大表現"),
 ]
 
 MAX_BIG, MAX_SUB, MAX_TITLE_LINE, MAX_PROP = 18, 22, 14, 10
+_PUNCT = re.compile(r"[。、，．,.！？!?]+")
 MAX_SAY_LINE = 30
 
 
@@ -230,7 +232,11 @@ def build_spec(src: dict, name: str) -> tuple[dict, list[str], list[str]]:
     last = {"ideal": (0, START_MONEY), "real": (0, START_MONEY)}
     for k, s in enumerate(raw):
         part = parts[k]
-        say = [_clean(x) for x in (s.get("say") or []) if _clean(x)]
+        # say は「1行＝読み上げの1フレーズ」。句読点が入っていたらそこで行を分ける
+        # （行末の「。」は台本が「。。」になり、行中の「、」はフックが4行以上に割れて
+        # 旧形式での作り直しが title_problems で止まるため）
+        say = [x.strip() for ln in (s.get("say") or [])
+               for x in _PUNCT.split(_clean(ln)) if x.strip()]
         where = f"{k + 1}番目の区間（{part}）"
         if not say:
             errors.append(f"{where}: say が空です")
@@ -238,8 +244,6 @@ def build_spec(src: dict, name: str) -> tuple[dict, list[str], list[str]]:
         for ln in say:
             if len(ln) > MAX_SAY_LINE:
                 errors.append(f"{where}: say の1行が長すぎます（{MAX_SAY_LINE}字まで）: {ln}")
-            if re.search(r"[。、，．！？!?]$", ln):
-                pass
         shot = _clean(s.get("shot"))
         if part in PART_SHOTS and shot not in PART_SHOTS[part]:
             errors.append(f"{where}: shot `{shot}` は使えません。使えるのは {PART_SHOTS[part]}")
