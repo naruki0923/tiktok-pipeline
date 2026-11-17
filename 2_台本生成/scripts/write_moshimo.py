@@ -186,12 +186,23 @@ def measure(spec: dict) -> tuple[float, str]:
         return shots.narration_seconds(spec), "文字数"
 
 
+def _spoken(src: dict) -> list[str]:
+    """LLMの元JSONの say を全部（形が崩れていても落ちない。崩れは build_spec が直させる）。"""
+    segs = src.get("segments")
+    out = []
+    for sg in segs if isinstance(segs, list) else []:
+        if isinstance(sg, dict):
+            say = sg.get("say") or []
+            out += [say] if isinstance(say, str) else [str(x) for x in say]
+    return out
+
+
 def check(src: dict, name: str) -> tuple[dict, list[str], list[str]]:
     """形・尺・65歳系を全部見る。(spec, エラー, 警告)。"""
     spec, errors, warns = shots.build_spec(src, name)
     hit = off_target("\n".join([src.get("title_band") or "", src.get("title") or "",
                                 *(str(t) for t in src.get("tags") or []),
-                                *(x for s in src.get("segments") or [] for x in (s.get("say") or []))]))
+                                *_spoken(src)]))
     if hit:
         return {}, [f"__OFF_TARGET__65歳系の内容（「{hit}」）は商材の対象外"], warns
     if errors:

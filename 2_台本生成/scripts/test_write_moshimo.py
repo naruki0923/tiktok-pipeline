@@ -56,6 +56,16 @@ class AskUntilOkTest(unittest.TestCase):
         fixer.assert_not_called()
 
 
+class BrokenShapeTest(unittest.TestCase):
+    def test_non_dict_segment_asks_fix_instead_of_crashing(self):
+        bad = src()
+        bad["segments"].append("壊れた区間")
+        fixer = unittest.mock.Mock(return_value=src())
+        with patch.object(wm, "measure", return_value=(66.0, "テスト")):
+            wm.ask_until_ok(bad, "本番_999", fixer)
+        fixer.assert_called_once()
+
+
 class AsListTest(unittest.TestCase):
     def test_string_tags_are_split_not_per_char(self):
         self.assertEqual(wm._as_list("退職 失業保険、国保"), ["退職", "失業保険", "国保"])
