@@ -59,6 +59,19 @@ class BuildSpecTest(unittest.TestCase):
         self.assertEqual(seg["say"], ["退職して1日目", "収入がゼロなので", "保険料もゼロ円です"])
         self.assertNotIn("。。", shots.script_text(spec))
 
+    def test_decimal_is_not_split(self):
+        s = src()
+        s["segments"][1]["say"] = ["給付は最大1.5倍", "1,000人が使っています"]
+        spec, errors, _ = shots.build_spec(s, "x")
+        seg = [x for x in spec["segments"] if x["part"] == "ideal"][0]
+        self.assertEqual(seg["say"], ["給付は最大1.5倍", "1,000人が使っています"])
+
+    def test_fullwidth_percent_is_banned(self):
+        s = src()
+        s["segments"][2]["say"] = ["１００％受け取れます"]
+        _, errors, _ = shots.build_spec(s, "x")
+        self.assertTrue(any("断定" in e for e in errors))
+
     def test_hook_with_comma_becomes_too_many_lines(self):
         s = src()
         s["segments"][0]["say"] = ["もし退職後、国保が", "今の収入で、決まったら"]

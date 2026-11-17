@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import copy
 import re
+import unicodedata
 
 # ------------------------------------------------------------------ 固定の前提
 START_MONEY = 120                 # カウンター「手元のお金」の初期値（万円）。毎回同じ人の話にする
@@ -35,7 +36,8 @@ BANNED = [
 ]
 
 MAX_BIG, MAX_SUB, MAX_TITLE_LINE, MAX_PROP = 18, 22, 14, 10
-_PUNCT = re.compile(r"[。、，．,.！？!?]+")
+# 半角の . , は数字の間（1.5倍・1,000）では区切らない
+_PUNCT = re.compile(r"(?:[。、，．！？!?]|(?<!\d)[.,]|[.,](?!\d))+")
 MAX_SAY_LINE = 30
 
 
@@ -304,7 +306,7 @@ def build_spec(src: dict, name: str) -> tuple[dict, list[str], list[str]]:
 
     allText = "\n".join([title, _clean(src.get("title")), *(x for s in segs for x in s["say"]),
                          *(s["big"] + " " + s["sub"] for s in segs)])
-    hit = _banned(allText)
+    hit = _banned(unicodedata.normalize("NFKC", allText))   # 全角の「１００％」も拾う
     if hit:
         errors.append(f"書かない言い回しが入っています: {hit}")
     if re.search(r"フォロー|個別面談|個別相談", "\n".join(x for s in segs for x in s["say"])):

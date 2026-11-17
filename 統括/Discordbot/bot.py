@@ -586,7 +586,9 @@ async def make_once(th: discord.abc.Messageable, mode: str, arg: str,
             if not ok:
                 await send(th, f"❌ {arg} の生成に失敗\n```\n{vlog[-1200:]}\n```")
                 return None, video_context(arg), vlog
-            res = {"name": arg, "title": "", "angle": ""}
+            # 台本を作った時に残したタイトル・切り口（作り直しでも完成通知に出す）
+            saved = runner.load_state().get("videos", {}).get(arg, {})
+            res = {"name": arg, "title": saved.get("title", ""), "angle": saved.get("angle", "")}
     except pipeline.VideoFailed as e:
         await send(th, f"❌ {e}")
         return None, video_context(e.name), str(e)
