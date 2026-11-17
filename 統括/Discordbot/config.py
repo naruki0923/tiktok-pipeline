@@ -67,6 +67,16 @@ TRANSCRIPT_DIR = ROOT / "2_台本生成" / "文字起こし"
 VIDEO_DIR = ROOT / "3_動画生成"
 VIDEO_SCRIPTS = VIDEO_DIR / "scripts"
 VIDEO_PY = VIDEO_SCRIPTS / ".venv" / "bin" / "python"
+
+# --- 動画の形式（2026-11-17 社長判断で 3Dのもしも型 が既定）---
+# "3d"      … write_moshimo.py（もしも型の台本＋場面）→ 3D/make_3d.py（Blender）。失敗した日は旧形式で作り直す
+# "classic" … 今までどおり write_script.py（完コピ）→ make_video.py（散歩背景）
+VIDEO_STYLE = os.environ.get("VIDEO_STYLE", "3d").strip().lower()
+WRITE_MOSHIMO = GEN_SCRIPTS / "write_moshimo.py"
+THREE_D_DIR = VIDEO_DIR / "3D"
+MAKE_3D = THREE_D_DIR / "make_3d.py"
+# 3Dの書き出しは70秒の動画で1時間前後（M3）。旧形式の40分では必ず打ち切られるので別に持つ
+RENDER_3D_TIMEOUT = int(os.environ.get("RENDER_3D_TIMEOUT", "7200"))
 SCRIPT_TXT_DIR = VIDEO_DIR / "音声"                     # 台本テキスト（本番_NNN.txt）
 OUTPUT_DIR = VIDEO_DIR / "output"                       # 完成動画
 

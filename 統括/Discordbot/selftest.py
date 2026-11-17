@@ -102,6 +102,8 @@ def main() -> None:
         ("1_リサーチ auto_research.py", config.AUTO_RESEARCH),
         ("2_台本生成 use_ref.py", config.USE_REF),
         ("2_台本生成 write_script.py", config.WRITE_SCRIPT),
+        ("2_台本生成 write_moshimo.py（3D）", config.WRITE_MOSHIMO),
+        ("3_動画生成 3D/make_3d.py", config.MAKE_3D),
         ("2_台本生成 venv", config.GEN_PY),
         ("3_動画生成 venv", config.VIDEO_PY),
         ("4_投稿 venv", config.POST_PY),
@@ -132,6 +134,14 @@ def main() -> None:
               "別扱いなので、\n    Botだけが読めない時は下のパスに"
               "フルディスクアクセスを与えてください:")
         print(f"    {runner._base_python()}")
+    if config.VIDEO_STYLE != "classic" and config.VIDEO_PY.exists():
+        # 毎朝の既定は3D（もしも型）。Blender・Mixamo素材・空き容量のどれかが欠けると
+        # 毎日旧形式に落ちる（作れはするので気づきにくい）
+        p3 = subprocess.run([str(config.VIDEO_PY), str(config.MAKE_3D), "--check"],
+                            cwd=str(config.THREE_D_DIR), capture_output=True, text=True)
+        check("3D動画（Blender・Mixamo素材・空き容量）", p3.returncode == 0,
+              " / ".join(ln.lstrip("✗ ") for ln in p3.stdout.splitlines() if ln.startswith("✗"))[:300]
+              or (p3.stderr or "make_3d.py --check が動かない")[-300:])
     ok_llm, detail = llm_check()
     check(f"台本生成のLLM経路（{detail}）", ok_llm,
           "ターミナルで `claude` を起動し /login でログインし直す")

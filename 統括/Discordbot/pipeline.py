@@ -4,8 +4,9 @@
 
     ① auto_research.py   参考動画の候補を集めて採点（黄金式・実尺・30日ルール）
     ② use_ref.py         候補を採用 → 文字起こし（whisper）→ 採用履歴に記録
-    ③ write_script.py    季節性・重複を判定 → 台本 → 整形 → キャプション（LLMはここだけ）
-    ④ make_video.py      TikTok/YouTube 2本を生成（--title-lines 付き）
+    ③ write_moshimo.py   季節性・重複を判定 → もしも型の台本＋3Dの場面 → 整形 → キャプション（LLMはここだけ）
+                         （VIDEO_STYLE=classic の時は write_script.py＝完コピ）
+    ④ make_3d.py         3Dで TikTok/YouTube 2本（1時間前後）。失敗した日は make_video.py（散歩背景）で作り直す
 
 ②③は候補の上から順に試し、③で「季節性NG」「角度が重複」と判定されたら
 採用履歴に【不採用】と理由を書き戻して次の候補へ進む（手運用と同じ作法）。
@@ -38,6 +39,18 @@ Log = Callable[[str], None]
 
 class PipelineError(RuntimeError):
     """通しの途中で進めなくなった。理由をそのままDiscordに出す。"""
+
+
+class VideoFailed(PipelineError):
+    """台本までは出来て、動画にする所で失敗した。作り直しは台本を使い回す（name に回番号）。
+
+    リサーチからやり直すと、3Dは1回で最大2時間超かかるうえ、そのたびに参考動画
+    （30日ロック）と本番番号を1つずつ使ってしまうため。
+    """
+
+    def __init__(self, name: str, message: str):
+        super().__init__(message)
+        self.name = name
 
 
 def _run(cmd: list[str], cwd: Path, timeout: int) -> subprocess.CompletedProcess:
@@ -132,8 +145,13 @@ def write_script(ref_file: Path, cand: dict, log: Log) -> dict:
     meta = json.dumps({k: cand.get(k) for k in
                        ("url", "title", "views", "duration", "upload_date",
                         "author", "followers", "golden_ratio")}, ensure_ascii=False)
-    log("✍️ 台本を作成中（季節性・角度の重複もここで判定）…")
-    p = _run([config.GEN_PY, config.WRITE_SCRIPT, "--ref", ref_file, "--meta", meta],
+    if config.VIDEO_STYLE == "classic":
+        script = config.WRITE_SCRIPT
+        log("✍️ 台本を作成中（季節性・角度の重複もここで判定）…")
+    else:
+        script = config.WRITE_MOSHIMO
+        log("✍️ もしも型の台本と3Dの場面を作成中（季節性・角度の重複もここで判定）…")
+    p = _run([config.GEN_PY, script, "--ref", ref_file, "--meta", meta],
              cwd=config.GEN_SCRIPTS, timeout=1800)
     tail = (p.stdout or "").strip().splitlines()
     try:
@@ -144,6 +162,26 @@ def write_script(ref_file: Path, cand: dict, log: Log) -> dict:
     if not res:
         raise PipelineError(f"台本生成に失敗\n```\n{(p.stderr or p.stdout)[-700:]}\n```")
     return res
+
+
+# --- ④ 動画 -----------------------------------------------------------------
+def make(name: str, log: Log, verb: str = "動画生成中") -> tuple[bool, str]:
+    """runner.make_video を呼ぶ。3Dの回は時間がかかる旨を、旧形式に切り替えた時はその旨を出す。"""
+    if runner.is_3d(name):
+        log(f"🎬 **{name}** 3D動画を書き出し中（1時間前後かかります）…")
+    else:
+        log(f"🎬 **{name}** {verb}（数分かかります）…")
+    ok, vlog = runner.make_video(name)
+    if ok and vlog.startswith(runner.FALLBACK_MARK):
+        log("\n".join(vlog.split("\n")[:2])[:900])
+    return ok, vlog
+
+
+def report_facts(res: dict, log: Log) -> None:
+    """もしも型で使った制度の事実。投稿前に社長が確かめる所（文字起こしに無い数字は⚠️で出る）。"""
+    facts = res.get("facts") or []
+    if facts:
+        log("📌 使った制度の事実（投稿前に確認してね）\n" + "\n".join(f"・{f}" for f in facts[:8]))
 
 
 # --- 通し --------------------------------------------------------------------
@@ -179,10 +217,10 @@ def run_auto(log: Log) -> dict:
                         ref_url=cand["url"], created=date.today().isoformat())
         for w in res.get("warnings", []):
             log(f"⚠️ {w}")
-        log(f"🎬 **{name}** 動画生成中（数分かかります）…")
-        ok, vlog = runner.make_video(name)
+        report_facts(res, log)
+        ok, vlog = make(name, log)
         if not ok:
-            raise PipelineError(f"{name} の動画生成に失敗\n```\n{vlog[-900:]}\n```")
+            raise VideoFailed(name, f"{name} の動画生成に失敗\n```\n{vlog[-900:]}\n```")
         return {"name": name, "title": res.get("title", ""), "angle": res.get("angle", ""),
                 "caption": res.get("caption", ""), "ref_url": cand["url"]}
 
@@ -201,8 +239,12 @@ def run_revise(name: str, instruction: str, log: Log) -> dict:
     if not runner.script_txt(name).exists():
         raise PipelineError(f"{name} の台本がありません")
     log(f"✏️ **{name}** を直します: 「{instruction}」")
-    p = _run([config.GEN_PY, config.REVISE_SCRIPT, "--name", name,
-              "--instruction", instruction], cwd=config.GEN_SCRIPTS, timeout=1800)
+    if runner.is_3d(name):
+        # もしも型の回は spec ごと直す（台本だけ直すと3Dの場面・字幕とずれる）
+        cmd = [config.GEN_PY, config.WRITE_MOSHIMO, "--revise", name, "--instruction", instruction]
+    else:
+        cmd = [config.GEN_PY, config.REVISE_SCRIPT, "--name", name, "--instruction", instruction]
+    p = _run(cmd, cwd=config.GEN_SCRIPTS, timeout=1800)
     tail = (p.stdout or "").strip().splitlines()
     try:
         res = json.loads(tail[-1]) if tail else {}
@@ -217,10 +259,9 @@ def run_revise(name: str, instruction: str, log: Log) -> dict:
         log(f"📝 {res['note']}")
     for w in res.get("warnings", []):
         log(f"⚠️ {w}")
-    log(f"🎬 **{name}** 動画を作り直しています…")
-    ok, vlog = runner.make_video(name)
+    ok, vlog = make(name, log, verb="動画を作り直しています")
     if not ok:
-        raise PipelineError(f"{name} の作り直しに失敗\n```\n{vlog[-900:]}\n```")
+        raise VideoFailed(name, f"{name} の作り直しに失敗\n```\n{vlog[-900:]}\n```")
     return {"name": name, "title": res.get("title", ""), "angle": res.get("note", "")}
 
 
@@ -236,9 +277,11 @@ def run_from_url(url: str, log: Log) -> dict:
     name = res["name"]
     runner.remember(name, title_lines=res.get("title_lines", 1), angle=res.get("angle", ""),
                     title=res.get("title", ""), ref_url=url, created=date.today().isoformat())
-    log(f"🎬 **{name}** 動画生成中…")
-    ok, vlog = runner.make_video(name)
+    for w in res.get("warnings", []):
+        log(f"⚠️ {w}")
+    report_facts(res, log)
+    ok, vlog = make(name, log)
     if not ok:
-        raise PipelineError(f"{name} の動画生成に失敗\n```\n{vlog[-900:]}\n```")
+        raise VideoFailed(name, f"{name} の動画生成に失敗\n```\n{vlog[-900:]}\n```")
     return {"name": name, "title": res.get("title", ""), "angle": res.get("angle", ""),
             "caption": res.get("caption", ""), "ref_url": url}
