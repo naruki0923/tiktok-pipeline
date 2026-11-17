@@ -84,6 +84,17 @@ class BuildSpecTest(unittest.TestCase):
         _, errors, _ = shots.build_spec(s, "x")
         self.assertEqual(errors, [])
 
+    def test_say_as_string_and_bad_segment(self):
+        s = src()
+        s["segments"][2]["say"] = "1か月後、届いた請求書はゼロ"
+        spec, errors, _ = shots.build_spec(s, "x")
+        self.assertEqual(errors, [])
+        self.assertEqual([x for x in spec["segments"] if x["part"] == "ideal"][1]["say"],
+                         ["1か月後", "届いた請求書はゼロ"])
+        s["segments"][3] = "壊れた区間"
+        _, errors, _ = shots.build_spec(s, "x")
+        self.assertTrue(errors)
+
     def test_cta_written_by_llm_is_error(self):
         s = src()
         s["segments"][-1]["say"] = ["このアカウントをフォローして"]

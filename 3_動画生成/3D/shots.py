@@ -211,6 +211,8 @@ def build_spec(src: dict, name: str) -> tuple[dict, list[str], list[str]]:
     raw = src.get("segments") or []
     if not isinstance(raw, list) or not raw:
         return {}, ["segments がありません"], []
+    if not all(isinstance(x, dict) for x in raw):
+        return {}, ["segments の中身は1区間ずつ {\"part\": …, \"say\": [...]} の形にしてください"], []
 
     title = _clean(src.get("title_band")).replace("\\n", "\n")
     tl = [x for x in title.split("\n") if x.strip()]
@@ -237,8 +239,10 @@ def build_spec(src: dict, name: str) -> tuple[dict, list[str], list[str]]:
         # say は「1行＝読み上げの1フレーズ」。句読点が入っていたらそこで行を分ける
         # （行末の「。」は台本が「。。」になり、行中の「、」はフックが4行以上に割れて
         # 旧形式での作り直しが title_problems で止まるため）
-        say = [x.strip() for ln in (s.get("say") or [])
-               for x in _PUNCT.split(_clean(ln)) if x.strip()]
+        lines = s.get("say") or []
+        if isinstance(lines, str):          # 1行だけを文字列で返してきた時（1文字ずつに割らない）
+            lines = [lines]
+        say = [x.strip() for ln in lines for x in _PUNCT.split(_clean(ln)) if x.strip()]
         where = f"{k + 1}番目の区間（{part}）"
         if not say:
             errors.append(f"{where}: say が空です")

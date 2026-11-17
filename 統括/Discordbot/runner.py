@@ -394,6 +394,10 @@ def make_video(name: str) -> tuple[bool, str]:
     if ok:
         return True, log
     reason = _short_reason(log)
+    # 3Dの1時間のあいだに背景素材が読めなくなっていると、旧形式は許可待ちで最大2時間固まる
+    bg = bg_dir_problem()
+    if bg:
+        return False, f"3Dで作れず、旧形式でも作れません（背景素材）\n[3D] {reason}\n{bg}"
     ok2, log2 = make_video_classic(name)
     if ok2:
         return True, f"{FALLBACK_MARK}\n3Dの失敗理由: {reason}\n\n{log2}"

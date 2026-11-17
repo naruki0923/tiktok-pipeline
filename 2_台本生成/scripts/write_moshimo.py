@@ -295,6 +295,9 @@ def main() -> None:
             fail(f"{name} は3D（もしも型）の回ではありません", name)
         old = json.loads(spec_path(name).read_text(encoding="utf-8"))
         current = old.get("source") or {}
+        if not current.get("segments"):
+            # 手で置いた spec（試作から移した回など）には LLM の元JSONが無く、直す土台が無い
+            fail(f"{name} は手で作った3Dの回なので、自動では直せません（spec を直接直してください）", name)
         print(f"■ {name} を手直し / LLM経路: {llm.backend()}", file=sys.stderr)
         res = llm.ask_json(REVISE_PROMPT.format(
             instruction=args.instruction, rules=rules, shot_guide=shots.shot_guide(),

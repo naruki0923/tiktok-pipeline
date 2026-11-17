@@ -35,9 +35,20 @@ class MakeVideo3DTest(TestCase):
             self.assertEqual(runner.make_video("本番_900"), (True, "3D完了"))
         c.assert_not_called()
 
+    def test_no_fallback_when_background_unreadable(self):
+        (self.dir / "本番_900.3d.json").write_text("{}", encoding="utf-8")
+        with (patch.object(runner, "make_video_3d", return_value=(False, "Blender の書き出しに失敗")),
+              patch.object(runner, "bg_dir_problem", return_value="🚫 背景素材の中を読めませんでした"),
+              patch.object(runner, "make_video_classic") as c):
+            ok, log = runner.make_video("本番_900")
+        self.assertFalse(ok)
+        self.assertIn("背景素材", log)
+        c.assert_not_called()
+
     def test_3d_failure_falls_back_to_classic(self):
         (self.dir / "本番_900.3d.json").write_text("{}", encoding="utf-8")
-        with (patch.object(runner, "make_video_3d", return_value=(False, "…\nBlender の書き出しに失敗")),
+        with (patch.object(runner, "bg_dir_problem", return_value=None),
+              patch.object(runner, "make_video_3d", return_value=(False, "…\nBlender の書き出しに失敗")),
               patch.object(runner, "make_video_classic", return_value=(True, "旧形式OK"))):
             ok, log = runner.make_video("本番_900")
         self.assertTrue(ok)
@@ -46,7 +57,8 @@ class MakeVideo3DTest(TestCase):
 
     def test_both_fail(self):
         (self.dir / "本番_900.3d.json").write_text("{}", encoding="utf-8")
-        with (patch.object(runner, "make_video_3d", return_value=(False, "タイムアウト（7200秒）")),
+        with (patch.object(runner, "bg_dir_problem", return_value=None),
+              patch.object(runner, "make_video_3d", return_value=(False, "タイムアウト（7200秒）")),
               patch.object(runner, "make_video_classic", return_value=(False, "旧形式NG"))):
             ok, log = runner.make_video("本番_900")
         self.assertFalse(ok)
