@@ -240,7 +240,16 @@ def spec_path(name: str) -> Path:
     return SCRIPT_TXT_DIR / f"{name}.3d.json"
 
 
+def _as_list(v) -> list[str]:
+    """LLMが配列のはずの所を文字列で返した時に、1文字ずつに割らないための受け口。"""
+    if isinstance(v, str):
+        return [x for x in re.split(r"[\s、,]+", v) if x]
+    return [str(x) for x in (v or []) if str(x).strip()]
+
+
 def save(name: str, src: dict, spec: dict, warns: list[str]) -> dict:
+    src = {**src, "tags": _as_list(src.get("tags")), "facts": _as_list(src.get("facts"))
+           if not isinstance(src.get("facts"), str) else [src["facts"]]}
     num = name.split("_")[-1]
     raw_path = GEN_DIR / f"台本_{num}.txt"
     raw_path.write_text(shots.script_text(spec), encoding="utf-8")

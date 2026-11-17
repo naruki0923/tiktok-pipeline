@@ -95,6 +95,12 @@ class BuildSpecTest(unittest.TestCase):
         _, errors, _ = shots.build_spec(s, "x")
         self.assertTrue(errors)
 
+    def test_props_not_dict_is_error(self):
+        s = src()
+        s["props"] = ["市民窓口"]
+        _, errors, _ = shots.build_spec(s, "x")
+        self.assertTrue(any("props" in e for e in errors))
+
     def test_cta_written_by_llm_is_error(self):
         s = src()
         s["segments"][-1]["say"] = ["このアカウントをフォローして"]

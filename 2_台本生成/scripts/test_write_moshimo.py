@@ -56,6 +56,12 @@ class AskUntilOkTest(unittest.TestCase):
         fixer.assert_not_called()
 
 
+class AsListTest(unittest.TestCase):
+    def test_string_tags_are_split_not_per_char(self):
+        self.assertEqual(wm._as_list("退職 失業保険、国保"), ["退職", "失業保険", "国保"])
+        self.assertEqual(wm._as_list(["退職", ""]), ["退職"])
+
+
 class FactWarningTest(unittest.TestCase):
     def test_number_missing_from_transcript_warns(self):
         spec, _, _ = wm.shots.build_spec(src(), "x")

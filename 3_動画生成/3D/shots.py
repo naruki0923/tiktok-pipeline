@@ -176,6 +176,9 @@ def _clean(s) -> str:
 def _props(raw: dict | None, errors: list[str]) -> dict:
     """小物の文字。長すぎる・型が違う所は既定に戻して警告ではなくエラーにする。"""
     out = copy.deepcopy(DEFAULT_PROPS)
+    if raw is not None and not isinstance(raw, dict):
+        errors.append("props は {\"letter_ideal\": [..], …} の形にしてください")
+        return out
     for k, v in (raw or {}).items():
         if k not in out:
             continue
