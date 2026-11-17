@@ -567,7 +567,8 @@ async def make_once(th: discord.abc.Messageable, mode: str, arg: str,
             if not runner.script_txt(arg).exists():
                 await th.send(f"⚠️ 台本が無いよ: {arg}.txt")
                 return None, "", ""          # 台本を置くのは人の仕事。作り直さない
-            await th.send(f"🎬 {arg} 生成中（数分待ってね）…")
+            wait = "3Dなので1時間前後" if runner.is_3d(arg) else "数分"
+            await th.send(f"🎬 {arg} 生成中（{wait}待ってね）…")
             ok, vlog = await asyncio.to_thread(runner.make_video, arg)
             if not ok:
                 await send(th, f"❌ {arg} の生成に失敗\n```\n{vlog[-1200:]}\n```")

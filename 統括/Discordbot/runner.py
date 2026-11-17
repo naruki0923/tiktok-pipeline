@@ -369,8 +369,89 @@ def title_problems(name: str, title_lines: int | None = None) -> list[str]:
     return probs
 
 
+def spec_3d(name: str) -> Path:
+    """もしも型3D動画の spec（write_moshimo.py が作る）。これがある回は3Dで作る。"""
+    return config.SCRIPT_TXT_DIR / f"{name}.3d.json"
+
+
+def is_3d(name: str) -> bool:
+    return spec_3d(name).exists()
+
+
+# 3Dで作れず旧形式に切り替えた時、ログの先頭に付ける。pipeline がこれを見て社長に知らせる
+FALLBACK_MARK = "⚠️ 3Dで作れなかったので、今までの形式（散歩背景）で作りました"
+
+
 def make_video(name: str) -> tuple[bool, str]:
     """台本 name.txt から TikTok/YouTube 2本を生成。VOICEVOXが前提。
+
+    3D（もしも型）の回は make_3d.py で作り、**失敗したら旧形式（散歩背景）で作り直す**
+    （2026-11-17 社長判断。その日の1本を落とさない）。旧形式の時は FALLBACK_MARK を先頭に付ける。
+    """
+    if not is_3d(name):
+        return make_video_classic(name)
+    ok, log = make_video_3d(name)
+    if ok:
+        return True, log
+    reason = _short_reason(log)
+    ok2, log2 = make_video_classic(name)
+    if ok2:
+        return True, f"{FALLBACK_MARK}\n3Dの失敗理由: {reason}\n\n{log2}"
+    return False, f"3Dでも旧形式でも作れませんでした\n[3D] {reason}\n[旧形式]\n{log2}"
+
+
+def _short_reason(log: str) -> str:
+    """3Dのログから、社長に見せる失敗理由の1〜3行。"""
+    lines = [ln.strip() for ln in log.strip().splitlines() if ln.strip()]
+    pick = [ln for ln in lines if any(k in ln for k in
+            ("タイムアウト", "作れません", "失敗", "Error", "エラー", "届きません", "見つかりません"))]
+    return " / ".join((pick or lines)[-3:])[:500] or "理由不明"
+
+
+def make_video_3d(name: str) -> tuple[bool, str]:
+    """make_3d.py で3D動画を作る（1時間前後）。2本とも新しく出来ていれば成功。"""
+    if not config.MAKE_3D.exists():
+        return False, f"3Dの仕組みが見つかりません: {config.MAKE_3D}"
+    started = time.time()
+    ok, log = _run_group(
+        [str(config.VIDEO_PY), str(config.MAKE_3D), str(spec_3d(name)),
+         "--name", name, "--out-dir", str(config.OUTPUT_DIR)],
+        cwd=config.THREE_D_DIR, timeout=config.RENDER_3D_TIMEOUT)
+    fresh = all(p.exists() and p.stat().st_mtime >= started for p in (tiktok_mp4(name), youtube_mp4(name)))
+    if ok and not fresh:
+        return False, log + "\n動画ファイルが出来ていません"
+    return ok, log
+
+
+def _run_group(cmd: list[str], cwd: Path, timeout: int) -> tuple[bool, str]:
+    """_run と同じだが、時間切れの時は孫プロセス（Blender・ffmpeg）までまとめて止める。
+
+    subprocess.run の timeout は直接の子（caffeinate）しか殺さず、Blender が裏で
+    書き出しを続けて旧形式の作り直しとCPUを取り合う＆後から mp4 を上書きするため。
+    """
+    import signal
+    env = os.environ.copy()
+    env["PYTHONUNBUFFERED"] = "1"
+    try:
+        proc = subprocess.Popen(["/usr/bin/caffeinate", "-i", "-m", "-s", *cmd], cwd=str(cwd),
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                                env=env, start_new_session=True)
+    except OSError as e:
+        return False, f"起動できません: {e}"
+    try:
+        out, _ = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        out, _ = proc.communicate()
+        return False, f"タイムアウト（{timeout}秒）\n" + _trim_log(out or "")
+    return proc.returncode == 0, _trim_log(out or "")
+
+
+def make_video_classic(name: str) -> tuple[bool, str]:
+    """旧形式（散歩背景）。台本 name.txt から TikTok/YouTube 2本を生成。
 
     レンダリング前に必ず title_problems() で止める。**タイトルは一番壊れやすく、
     壊れたまま出来上がると人が気づくまで分からない**ので、作らせない方が安全。
