@@ -117,5 +117,22 @@ class RunAutoTest(TestCase):
         self.assertEqual(adopt.call_count, pipeline.MAX_SCRIPT_ATTEMPTS)
 
 
+class ReportTitlesTest(TestCase):
+    def test_chosen_and_other_candidates(self):
+        out = []
+        pipeline.report_titles({"title_candidates": [
+            {"title": "もし病気で働けなくなったら？", "system": "傷病手当金"},
+            {"title": "もし家賃が払えなくなったら？", "system": ""}, "壊れた"]}, out.append)
+        self.assertEqual(len(out), 1)
+        self.assertIn("🎯 タイトル: もし病気で働けなくなったら？（→ 傷病手当金）", out[0])
+        self.assertIn("・もし家賃が払えなくなったら？", out[0])
+
+    def test_no_candidates_says_nothing(self):
+        out = []
+        pipeline.report_titles({}, out.append)
+        pipeline.report_titles({"title_candidates": "壊れた"}, out.append)
+        self.assertEqual(out, [])
+
+
 if __name__ == "__main__":
     main()

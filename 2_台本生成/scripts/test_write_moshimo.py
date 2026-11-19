@@ -74,11 +74,53 @@ class AsListTest(unittest.TestCase):
 
 class FactWarningTest(unittest.TestCase):
     def test_number_missing_from_transcript_warns(self):
-        spec, _, _ = wm.shots.build_spec(src(), "x")
-        warns = wm.fact_warnings(spec, "前の年の給料を3割として計算します")
-        self.assertEqual(warns, [])
-        warns = wm.fact_warnings(spec, "軽減があります")
-        self.assertTrue(any("3" in w for w in warns))
+        s = src()
+        s["segments"][-1]["say"] = ["受け取れるのは最長で1年6か月です", "まずは確かめてみてください"]
+        spec, errors, _ = wm.shots.build_spec(s, "x", kind="bad")
+        self.assertEqual(errors, [])
+        self.assertEqual(wm.fact_warnings(spec, "通算して1年6か月まで受け取れます"), [])
+        warns = wm.fact_warnings(spec, "受け取れる期間があります")
+        self.assertTrue(any("1" in w for w in warns))
+
+    def test_bad_future_numbers_are_not_facts(self):
+        # 悪いもしも（real）は仮の話。貯金の額などは文字起こしに無くても警告しない
+        spec, _, _ = wm.shots.build_spec(src(), "x", kind="bad")
+        self.assertEqual(wm.fact_warnings(spec, "健康保険の制度です"), [])
+
+
+class KindTest(unittest.TestCase):
+    """新しく作る回は必ず悪いもしも。理想のもしも（147・148）は手直しの時だけ通す。"""
+
+    LEGACY = json.loads((wm.THREE_D / "examples" / "kokuho_src.json").read_text(encoding="utf-8"))
+
+    def test_new_script_in_ideal_shape_is_rejected(self):
+        with patch.object(wm, "measure", return_value=(66.0, "テスト")):
+            _, errors, _ = wm.check(copy.deepcopy(self.LEGACY), "本番_999")
+        self.assertTrue(any("hook→real→system" in e for e in errors))
+
+    def test_revise_keeps_ideal_shape(self):
+        with patch.object(wm, "measure", return_value=(66.0, "テスト")):
+            spec, errors, _ = wm.check(copy.deepcopy(self.LEGACY), "本番_999",
+                                       kind=wm.shots.kind_of(self.LEGACY))
+        self.assertEqual(errors, [])
+        self.assertIn("rewind", [s["part"] for s in spec["segments"]])
+
+
+class TitleTest(unittest.TestCase):
+    def test_title_rules_are_the_conditions_only(self):
+        text = wm.title_rules()
+        self.assertTrue(text.startswith("## タイトルの条件"))
+        self.assertIn("もし〇〇だったら？", text)
+
+    def test_candidates_tolerate_broken_shapes(self):
+        got = wm.candidates({"title_candidates": [{"title": "もし家賃が払えなくなったら？", "system": "住居確保給付金"},
+                                                   "もし再就職先が見つからなかったら？", 3, {"title": ""}]})
+        self.assertEqual([c["title"] for c in got], ["もし家賃が払えなくなったら？", "もし再就職先が見つからなかったら？"])
+        self.assertEqual(got[0]["story"], "")
+        self.assertEqual(wm.candidates({"title_candidates": "壊れた"}), [])
+
+    def test_example_has_candidates(self):
+        self.assertEqual(wm.candidates(src())[0]["title"], "もし病気で働けなくなったら？")
 
 
 if __name__ == "__main__":

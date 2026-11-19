@@ -4,7 +4,8 @@
 
     ① auto_research.py   参考動画の候補を集めて採点（黄金式・実尺・30日ルール）
     ② use_ref.py         候補を採用 → 文字起こし（whisper）→ 採用履歴に記録
-    ③ write_moshimo.py   季節性・重複を判定 → もしも型の台本＋3Dの場面 → 整形 → キャプション（LLMはここだけ）
+    ③ write_moshimo.py   季節性・重複を判定 → 参考動画の制度につながる「悪いもしも」のタイトル案を出して1本選ぶ
+                         → 台本＋3Dの場面 → 整形 → キャプション（LLMはここだけ。1本につき1回）
                          （VIDEO_STYLE=classic の時は write_script.py＝完コピ）
     ④ make_3d.py         3Dで TikTok/YouTube 2本（1時間前後）。失敗した日は make_video.py（散歩背景）で作り直す
 
@@ -150,7 +151,7 @@ def write_script(ref_file: Path, cand: dict, log: Log) -> dict:
         log("✍️ 台本を作成中（季節性・角度の重複もここで判定）…")
     else:
         script = config.WRITE_MOSHIMO
-        log("✍️ もしも型の台本と3Dの場面を作成中（季節性・角度の重複もここで判定）…")
+        log("✍️ 悪いもしものタイトル案と台本・3Dの場面を作成中（季節性・角度の重複もここで判定）…")
     p = _run([config.GEN_PY, script, "--ref", ref_file, "--meta", meta],
              cwd=config.GEN_SCRIPTS, timeout=1800)
     tail = (p.stdout or "").strip().splitlines()
@@ -175,6 +176,19 @@ def make(name: str, log: Log, verb: str = "動画生成中") -> tuple[bool, str]
     if ok and vlog.startswith(runner.FALLBACK_MARK):
         log("\n".join(vlog.split("\n")[:2])[:900])
     return ok, vlog
+
+
+def report_titles(res: dict, log: Log) -> None:
+    """もしも型で選んだタイトルと、選ばなかった案（気に入った案があれば「直して」で差し替えられる）。"""
+    cands = [c for c in res.get("title_candidates") or [] if isinstance(c, dict) and c.get("title")]
+    if not cands:
+        return
+    head, rest = cands[0], cands[1:]
+    lines = [f"🎯 タイトル: {head['title']}" + (f"（→ {head['system']}）" if head.get("system") else "")]
+    if rest:
+        lines.append("ほかの案:")
+        lines += [f"・{c['title']}" + (f"（→ {c['system']}）" if c.get("system") else "") for c in rest[:4]]
+    log("\n".join(lines))
 
 
 def report_facts(res: dict, log: Log) -> None:
@@ -217,6 +231,7 @@ def run_auto(log: Log) -> dict:
                         ref_url=cand["url"], created=date.today().isoformat())
         for w in res.get("warnings", []):
             log(f"⚠️ {w}")
+        report_titles(res, log)
         report_facts(res, log)
         ok, vlog = make(name, log)
         if not ok:
@@ -279,6 +294,7 @@ def run_from_url(url: str, log: Log) -> dict:
                     title=res.get("title", ""), ref_url=url, created=date.today().isoformat())
     for w in res.get("warnings", []):
         log(f"⚠️ {w}")
+    report_titles(res, log)
     report_facts(res, log)
     ok, vlog = make(name, log)
     if not ok:

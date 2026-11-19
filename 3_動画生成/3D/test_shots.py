@@ -140,5 +140,59 @@ class BuildSpecTest(unittest.TestCase):
         self.assertGreater(shots.narration_seconds(spec), 60)
 
 
+BAD = json.loads((Path(__file__).parent / "examples" / "byoki_src.json").read_text(encoding="utf-8"))
+
+
+class BadFutureTest(unittest.TestCase):
+    """悪いもしも（hook → real → system → CTA。巻き戻し無し）。"""
+
+    def bad(self):
+        return copy.deepcopy(BAD)
+
+    def test_example_builds_without_rewind(self):
+        spec, errors, warns = shots.build_spec(self.bad(), "本番_999", kind="bad")
+        self.assertEqual(errors, [])
+        self.assertEqual(warns, [])            # 数字の無いフックでも警告しない
+        self.assertEqual(spec["kind"], "bad")
+        parts = [s["part"] for s in spec["segments"]]
+        self.assertNotIn("rewind", parts)
+        self.assertNotIn("ideal", parts)
+        self.assertEqual(parts[-3:], ["cta"] * 3)
+        real = [s for s in spec["segments"] if s["part"] == "real"]
+        self.assertTrue(all(s["badge"] == "もしも" and s["grade"] == "real" for s in real))
+        self.assertEqual(real[0]["sub"], shots.IDEAL_SUB)        # 省いた小字幕は「※もしもの話です」
+        self.assertEqual(spec["day_label"], "休み始めて")
+        self.assertGreater(shots.narration_seconds(spec), 61)
+
+    def test_kind_is_detected_from_parts(self):
+        self.assertEqual(shots.kind_of(self.bad()), "bad")
+        self.assertEqual(shots.kind_of(src()), "ideal")
+
+    def test_ideal_part_is_rejected_when_bad_is_required(self):
+        _, errors, _ = shots.build_spec(src(), "x", kind="bad")
+        self.assertTrue(any("hook→real→system" in e for e in errors))
+
+    def test_day_label_default_and_length(self):
+        s = self.bad()
+        s.pop("day_label")
+        spec, errors, _ = shots.build_spec(s, "x", kind="bad")
+        self.assertEqual((errors, spec["day_label"]), ([], shots.DAY_LABEL))
+        s["day_label"] = "病気で会社を休み始めてから"
+        _, errors, _ = shots.build_spec(s, "x", kind="bad")
+        self.assertTrue(any("day_label" in e for e in errors))
+
+    def test_too_few_bad_future_segments(self):
+        s = self.bad()
+        s["segments"] = [x for k, x in enumerate(s["segments"]) if not (x["part"] == "real" and k > 2)]
+        _, errors, _ = shots.build_spec(s, "x", kind="bad")
+        self.assertTrue(any("real の区間は4〜8個" in e for e in errors))
+
+    def test_shiranaito_son_is_banned(self):
+        s = self.bad()
+        s["segments"][1]["say"] = ["知らないと損する話です"]
+        _, errors, _ = shots.build_spec(s, "x", kind="bad")
+        self.assertTrue(any("煽り表現" in e for e in errors))
+
+
 if __name__ == "__main__":
     unittest.main()
