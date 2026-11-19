@@ -4,8 +4,11 @@
     ./.venv/bin/python write_moshimo.py --ref ../文字起こし/ref_027.txt --meta '{"url":"..."}'
     ./.venv/bin/python write_moshimo.py --revise 本番_150 --instruction "フックをもっと短く"
 
-参考動画は「何の話をするか」を選ぶのに使うだけで、台本は完コピしない。
-もしもの世界は自由に描かせ、現実・今の制度の事実は文字起こしにあるものだけで書かせる。
+型は「悪いもしも」（2026-11-19・issue #30）: もし〇〇だったら？ → 悪い未来 → 終盤で今の制度 → 固定CTA。
+リサーチで選んだ参考動画は「今伸びている悩み」と「制度の事実」の出どころで、台本は完コピしない。
+その制度につながるタイトル案を `プロンプト_もしもタイトル.md`（社長が手応えを見たプロンプト）の条件で
+3〜5本出させ、いちばん良い1本で台本にする（同じ1回の呼び出しの中で）。
+悪いもしもは自由に描かせ、今の制度の事実は文字起こしにあるものだけで書かせる。
 ルールは `2_台本生成/もしも型ルール.md`（人が書く）、場面は `3_動画生成/3D/shots.py` の型から選ばせる。
 
 **LLMは1回、直しが要る時だけもう1回**（形の崩れ・尺の外れをまとめて1回で直させる）。
@@ -31,10 +34,11 @@ HERE = Path(__file__).resolve().parent            # 2_台本生成/scripts
 GEN_DIR = HERE.parent
 ROOT = GEN_DIR.parent
 RULES = GEN_DIR / "もしも型ルール.md"
+TITLE_RULES = GEN_DIR / "プロンプト_もしもタイトル.md"
 SCRIPT_TXT_DIR = ROOT / "3_動画生成" / "音声"
 CAPTION_DIR = ROOT / "4_投稿" / "投稿予定"
 THREE_D = ROOT / "3_動画生成" / "3D"
-EXAMPLE = THREE_D / "examples" / "kokuho_src.json"
+EXAMPLE = THREE_D / "examples" / "byoki_src.json"     # 悪いもしもの形の見本（内容は真似させない）
 
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(THREE_D))
@@ -47,8 +51,16 @@ from target_age import off_target  # noqa: E402
 MIN_SEC, MAX_SEC = 61.0, 75.0     # ナレーションの見積もり（動画はこれ＋約2秒）。必ず1分超え
 
 PROMPT = """あなたは退職給付金ジャンルのTikTok台本ライターです。
-参考動画の文字起こしから「何の話をするか」だけを借りて、**もしも型**の3D動画の台本と場面指定を作ってください。
-参考動画の完コピではありません。構成・言い回しは下の「もしも型ルール」に従って一から書きます。
+リサーチで選んだ、今伸びている参考動画の文字起こしを材料に、**悪いもしも型**の3D動画の台本と場面指定を作ってください。
+参考動画の完コピではありません。文字起こしから「視聴者が抱えている不安」と「つなげる制度の事実」だけを借り、
+タイトルは下の「タイトルの条件」で、構成・言い回しは「もしも型ルール」で一から書きます。
+
+# 手順
+1. 文字起こしに出てくる制度と、それを必要とする人の不安を読み取る。
+2. その制度につながる「もし〇〇だったら？」のタイトル案を、タイトルの条件に沿って3〜5本考える
+   （異なる状況を選ぶ。制度とのつながりが弱い案は入れない）。
+3. いちばん状況が目に浮かび、文字起こしの事実で終盤の制度パートまで書ける1本を選ぶ。
+4. 選んだタイトルで台本を書く。
 
 # 今日の日付
 {today}
@@ -60,8 +72,8 @@ PROMPT = """あなたは退職給付金ジャンルのTikTok台本ライター�
 1. **季節性**: 今日この動画を見る人に当てはまるか。今日の月に当てはまらない月依存のネタなら ok=false。
 2. **角度の重複**: 実績で分ける。【勝ち筋】の角度は重複を理由に落とさない（入口を変えて再訪する）。
    【沈んだ角度】と実質同じ切り口なら ok=false。どちらにも無い新しい角度は ok=true。
-3. **もしも型にできるか**: 「制度がもっとこうだったら」の想像と、今の制度で取り戻す方法の両方が書けるか。
-   文字起こしに制度の事実（対象・条件・窓口など）がほとんど無い、自宅・公園・役所の3か所で描けない、なら ok=false。
+3. **悪いもしも型にできるか**: 自分にも起こりそうな悪い未来と、文字起こしの事実でつなげる制度の両方が書けるか。
+   文字起こしに制度の事実（対象・窓口・申請など）がほとんど無い、自宅・公園・役所の3か所で描けない、なら ok=false。
 
 ok=false のときは reason に理由だけ書き、他は空でよい。
 
@@ -70,6 +82,12 @@ ok=false のときは reason に理由だけ書き、他は空でよい。
 
 # 今週の重点方針（5_分析 の実測から自動更新）
 {focus}
+
+# 最近の3D動画で使ったタイトル（同じタイトル・ほぼ同じ言い換えは選ばない。同じ制度でも別の状況から入る）
+{recent}
+
+# タイトルの条件（これに沿ってタイトル案を出す）
+{title_rules}
 
 # もしも型ルール（これが唯一の正。すべて守ること）
 {rules}
@@ -81,11 +99,11 @@ ok=false のときは reason に理由だけ書き、他は空でよい。
 {shot_guide}
 
 # 場面の小物に書く文字（props。話題に合わせて差し替える。1行10字まで）
-- letter_ideal / letter_real: 自宅のテーブルの書類（もしも／現実）2行
-- pc_ideal / pc_real: ノートPCの画面（もしも／現実）2行
+- letter_real: 自宅のテーブルの書類 2行（「給与明細」「家賃の督促」「納付通知書」など）
+- pc_real: ノートPCの画面 2行（求人・検索画面など）
 - office_sign: 役所の壁の大看板（「市民窓口」「ハローワーク」など）
 - office_window: 主人公が行く窓口の吊り看板（「国民健康保険」「雇用保険」など）
-- office_notice: 窓口のカウンターに置いた通知書 2行
+- office_notice: 窓口のカウンターに置いた通知書・申請書 2行
 - office_doc: 窓口に持っていく書類（「受給資格者証」「離職票」など）
 
 # 参考動画の情報
@@ -94,37 +112,42 @@ ok=false のときは reason に理由だけ書き、他は空でよい。
 # 参考動画の文字起こし（誤変換を含む下書き。数字・同音異義語は文脈で直すこと）
 {transcript}
 
-# 出力の例（国保の回。形だけ真似る。内容は真似ない）
+# 出力の例（病気の回。形だけ真似る。話題・制度名・制度の説明の言い回しは真似ない。事実は必ず上の文字起こしから）
 {example}
 
 # 出力形式（JSONのみ）
 {{
   "ok": true または false,
-  "reason": "判定の理由を1〜2文",
+  "reason": "判定の理由と、その案を選んだ理由を1〜2文",
   "angle": "この台本の切り口を30字程度で",
-  "title_band": "画面上の固定タイトル。「もし」で始める。\\nで区切った2行・1行14字まで",
-  "title": "投稿のタイトル。20〜30字。【】は付けない",
+  "title_candidates": [
+    {{"title": "もし〇〇だったら？", "story": "描く悪いもしもの展開を1文", "system": "つなげる制度名", "close": "誤解のない短い締めの一言"}}
+  ],
+  "title_band": "画面上の固定タイトル＝選んだタイトル。\\nで区切った2行・1行14字まで",
+  "title": "投稿のタイトル。選んだタイトル＋ひとこと。20〜30字。【】は付けない。制度名は入れない",
+  "day_label": "カウンターの見出し。8字まで（「退職してから」「休み始めて」など）",
   "tags": ["退職", "..."],
-  "props": {{...上の8項目...}},
+  "props": {{...上の6項目...}},
   "segments": [
     {{"part": "hook", "say": ["行", "行"], "shot": "home_wide", "big": "大字幕"}},
-    {{"part": "ideal", "say": [...], "shot": "...", "big": "...", "day": 1, "money": 120}},
-    {{"part": "real", "say": [...], "shot": "...", "big": "...", "sub": "小字幕", "day": 30, "money": 92, "join": false}},
+    {{"part": "real", "say": [...], "shot": "...", "big": "...", "sub": "小字幕（省略可）", "day": 1, "money": 120, "join": false}},
     {{"part": "system", "say": [...], "shot": "office_walk", "big": "...", "sub": "..."}}
   ],
-  "facts": ["現実・今の制度で使った事実 ← 文字起こしのどの言い回しか"]
+  "facts": ["今の制度で使った事実 ← 文字起こしのどの言い回しか"]
 }}
+- title_candidates は3〜5本。選んだ案を先頭に置く。
+- パートは hook → real（悪いもしも）→ system（今の制度）の順に1回ずつ。ideal は使わない。
 - say は読み上げる行。1行30字まで・句読点なし。1区間に1〜4行。
 - join: true は「この区間の最後の行と次の区間の頭で1文になる」時だけ（同じパートの中だけ）。
-- 巻き戻し（でも現実は違います）とCTAは**書かない**（自動で足す）。
+- CTAは**書かない**（自動で足す）。
 """
 
 FIX_PROMPT = """次のもしも型台本JSONに直すべき点があります。**直すべき点だけ**直して、同じ形のJSONを全部返してください。
-内容（話題・事実・流れ）は変えないこと。事実は文字起こしにあるものだけ、のルールも守ること。
+内容（話題・事実・流れ）は変えないこと。新しい制度の事実を足さないこと（事実は今のJSONにあるものだけ）。
 
 # 直すべき点
 {errors}
-
+{kind_note}
 # もしも型ルール（抜粋ではなく全文）
 {rules}
 
@@ -141,7 +164,7 @@ REVISE_PROMPT = """次のもしも型台本JSONを、社長の指示どおりに
 
 # 社長の指示
 {instruction}
-
+{kind_note}
 # もしも型ルール
 {rules}
 
@@ -151,6 +174,19 @@ REVISE_PROMPT = """次のもしも型台本JSONを、社長の指示どおりに
 # 今のJSON
 {current}
 """
+
+
+# 理想のもしも（本番_147/148）を直す時だけ添える。ルールは悪いもしも型で書いてあるので、
+# そのまま渡すと LLM が並びを組み替えてしまい、ideal 型の検査で落ちる
+IDEAL_NOTE = """
+# この回の型（ルールより優先）
+この回は以前の「理想のもしも」型で作った回です。パートの並びは hook → ideal（もしもの世界）→ real（現実）→ system のまま変えないこと。
+下のルールの「型」「悪いもしも」の説明はこの回には当てはまりません（巻き戻しとCTAは自動で入る）。
+"""
+
+
+def kind_note(kind: str) -> str:
+    return IDEAL_NOTE if kind == "ideal" else ""
 
 
 # ------------------------------------------------------------------ 検査
@@ -165,9 +201,11 @@ def fact_warnings(spec: dict, transcript: str) -> list[str]:
     日付カウンター用の「1か月後」「3か月後」等の時間の言い回しは除く。
     """
     have = _digits(transcript)
+    # 悪いもしもの real は仮の話（数字はイメージ）なので、事実として見るのは今の制度だけ
+    parts = ("system",) if spec.get("kind") == "bad" else ("real", "system")
     out = []
     for s in spec["segments"]:
-        if s.get("part") not in ("real", "system"):
+        if s.get("part") not in parts:
             continue
         text = re.sub(r"\d+\s*(か月|ヶ月|カ月|日目|年後)", "", unicodedata.normalize("NFKC", " ".join(s["say"])))
         miss = sorted(d for d in _digits(text) if d not in have)
@@ -197,9 +235,9 @@ def _spoken(src: dict) -> list[str]:
     return out
 
 
-def check(src: dict, name: str) -> tuple[dict, list[str], list[str]]:
-    """形・尺・65歳系を全部見る。(spec, エラー, 警告)。"""
-    spec, errors, warns = shots.build_spec(src, name)
+def check(src: dict, name: str, kind: str = "bad") -> tuple[dict, list[str], list[str]]:
+    """形・尺・65歳系を全部見る。(spec, エラー, 警告)。新しく作る回は必ず悪いもしも（kind="bad"）。"""
+    spec, errors, warns = shots.build_spec(src, name, kind=kind)
     hit = off_target("\n".join([src.get("title_band") or "", src.get("title") or "",
                                 *(str(t) for t in src.get("tags") or []),
                                 *_spoken(src)]))
@@ -212,33 +250,34 @@ def check(src: dict, name: str) -> tuple[dict, list[str], list[str]]:
     if sec < MIN_SEC:
         chars = sum(len(x) for x in shots.spoken_lines(spec))
         errors.append(f"尺が短すぎます（ナレーション約{sec:.0f}秒・{how}で計測）。必ず1分を超えるよう、"
-                      f"もしもの世界か現実の区間を足して、say を全部で今より{int((MIN_SEC + 3 - sec) * 6.5)}字ほど増やしてください（今{chars}字）")
+                      f"{'もしもの世界か現実' if kind == 'ideal' else '悪いもしも'}の区間を足して、say を全部で今より{int((MIN_SEC + 3 - sec) * 6.5)}字ほど増やしてください（今{chars}字）")
     elif sec > MAX_SEC:
         errors.append(f"尺が長すぎます（ナレーション約{sec:.0f}秒・{how}で計測）。上限は{MAX_SEC:.0f}秒です。"
                       f"say を全部で{int((sec - 68) * 6.5)}字ほど減らしてください")
     return spec, errors, warns
 
 
-def ask_until_ok(first: dict, name: str, fixer) -> tuple[dict, dict, list[str]]:
+def ask_until_ok(first: dict, name: str, fixer, kind: str = "bad") -> tuple[dict, dict, list[str]]:
     """検査 → ダメなら1回だけ直させる。(src, spec, 警告)。直らなければ ValueError。"""
     src = first
-    spec, errors, warns = check(src, name)
+    spec, errors, warns = check(src, name, kind)
     if errors and not errors[0].startswith("__OFF_TARGET__"):
         print("⟳ 直しが要る点:\n" + "\n".join(f"  - {e}" for e in errors), file=sys.stderr)
         fixed = fixer(src, errors)
         if fixed:
             src = {**first, **fixed, "ok": True}
-            spec, errors, warns = check(src, name)
+            spec, errors, warns = check(src, name, kind)
     if errors:
         raise ValueError(" / ".join(e.replace("__OFF_TARGET__", "") for e in errors)[:600])
     return src, spec, warns
 
 
-def _fixer(rules: str):
+def _fixer(rules: str, kind: str = "bad"):
     def fix(src: dict, errors: list[str]) -> dict | None:
         try:
             return llm.ask_json(FIX_PROMPT.format(
-                errors="\n".join(f"- {e}" for e in errors), rules=rules, shot_guide=shots.shot_guide(),
+                errors="\n".join(f"- {e}" for e in errors), kind_note=kind_note(kind),
+                rules=rules, shot_guide=shots.shot_guide(kind),
                 current=json.dumps(src, ensure_ascii=False, indent=1)), max_tokens=8000)
         except llm.LLMError as e:
             print(f"⚠ 直しの呼び出しに失敗: {e}", file=sys.stderr)
@@ -283,7 +322,66 @@ def save(name: str, src: dict, spec: dict, warns: list[str]) -> dict:
         "est_seconds": spec.get("est_seconds"),
         "script_txt": str(out_path), "spec": str(spec_path(name)), "raw_txt": str(raw_path),
         "caption": caption, "facts": spec["facts"], "warnings": warns + fwarn,
+        "title_candidates": candidates(src),
     }
+
+
+def candidates(src: dict) -> list[dict]:
+    """タイトル案（LLMの形が崩れていても落ちない）。Discordに「他の案」として出す。
+
+    65歳系の案は出さない（選ばなかった案でも、社長が「その案で直して」と頼む入口になるため）。
+    """
+    raw = src.get("title_candidates")
+    out = []
+    for c in raw if isinstance(raw, list) else []:
+        if isinstance(c, dict) and str(c.get("title") or "").strip():
+            row = {k: str(c.get(k) or "").strip() for k in ("title", "story", "system", "close")}
+        elif isinstance(c, str) and c.strip():
+            row = {"title": c.strip(), "story": "", "system": "", "close": ""}
+        else:
+            continue
+        if not off_target("\n".join(row.values())):
+            out.append(row)
+    return out[:5]
+
+
+RECENT_TITLES = 20
+
+
+def recent_titles(limit: int = RECENT_TITLES, exclude: str | None = None) -> str:
+    """最近の3Dの回のタイトル帯（新しい順）。日をまたいで同じタイトルを選ばせないため。
+
+    実績.tsv は投稿して数字が付いた回の角度しか持たないので、公開前・未投稿の回はここで拾う。
+    spec は30日の自動削除の対象外（消えるのは mp4/wav/mp3 だけ）。
+    """
+    def num(p: Path) -> int:
+        m = re.search(r"_(\d+)\.3d\.json$", p.name)
+        return int(m.group(1)) if m else -1
+
+    out = []
+    for p in sorted(SCRIPT_TXT_DIR.glob("本番_*.3d.json"), key=num, reverse=True):
+        if exclude and p.name == f"{exclude}.3d.json":
+            continue
+        try:
+            title = str(json.loads(p.read_text(encoding="utf-8")).get("title") or "")
+        except (OSError, ValueError, AttributeError):
+            continue
+        title = re.sub(r"\s", "", title)
+        if title and title not in out:
+            out.append(title)
+        if len(out) >= limit:
+            break
+    return "\n".join(f"- {t}" for t in out) or "（まだ無し）"
+
+
+def title_rules() -> str:
+    """プロンプト_もしもタイトル.md の「## タイトルの条件」以下（前置きは人向けの説明なので渡さない）。"""
+    try:
+        text = TITLE_RULES.read_text(encoding="utf-8")
+    except OSError:
+        return "（タイトルの条件ファイルがありません。もしも型ルールに従う）"
+    m = re.search(r"^## タイトルの条件", text, re.M)
+    return (text[m.start():] if m else text).strip()
 
 
 def fail(reason: str, name: str) -> None:
@@ -319,12 +417,14 @@ def main() -> None:
             # 手で置いた spec（試作から移した回など）には LLM の元JSONが無く、直す土台が無い
             fail(f"{name} は手で作った3Dの回なので、自動では直せません（spec を直接直してください）", name)
         print(f"■ {name} を手直し / LLM経路: {llm.backend()}", file=sys.stderr)
+        kind = shots.kind_of(current)        # 理想のもしもで作った回（147・148）は、その型のまま直す
         res = llm.ask_json(REVISE_PROMPT.format(
-            instruction=args.instruction, rules=rules, shot_guide=shots.shot_guide(),
+            instruction=args.instruction, kind_note=kind_note(kind), rules=rules,
+            shot_guide=shots.shot_guide(kind),
             current=json.dumps(current, ensure_ascii=False, indent=1)), max_tokens=8000)
         note = res.pop("note", "")
         try:
-            src, spec, warns = ask_until_ok({**current, **res, "ok": True}, name, _fixer(rules))
+            src, spec, warns = ask_until_ok({**current, **res, "ok": True}, name, _fixer(rules, kind), kind)
         except ValueError as e:
             fail(f"手直し後の台本が使えません: {e}", name)
         out = save(name, src, spec, warns)
@@ -345,7 +445,8 @@ def main() -> None:
 
     prompt = PROMPT.format(
         today=f"{date.today():%Y年%m月%d日}", angles=ws.covered_angles(exclude_ref=ref),
-        focus=ws.focus_note(), rules=rules, assumption=shots.ASSUMPTION,
+        focus=ws.focus_note(), recent=recent_titles(exclude=name), title_rules=title_rules(),
+        rules=rules, assumption=shots.ASSUMPTION,
         shot_guide=shots.shot_guide(), meta=args.meta, transcript=transcript[:8000],
         example=example_json())
     res = llm.ask_json(prompt, max_tokens=8000)

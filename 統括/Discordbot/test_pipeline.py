@@ -117,5 +117,39 @@ class RunAutoTest(TestCase):
         self.assertEqual(adopt.call_count, pipeline.MAX_SCRIPT_ATTEMPTS)
 
 
+class ReportTitlesTest(TestCase):
+    def test_chosen_and_other_candidates(self):
+        out = []
+        # 選んだ案が先頭でなくても、動画に使われた title_band の案を「🎯」にする
+        pipeline.report_titles({"title_band": "もし病気で\n働けなくなったら？", "title_candidates": [
+            {"title": "もし家賃が払えなくなったら？", "system": ""},
+            {"title": "もし病気で働けなくなったら？", "system": "傷病手当金"}, "壊れた"]}, out.append)
+        self.assertEqual(len(out), 1)
+        self.assertIn("🎯 タイトル: もし病気で働けなくなったら？（→ 傷病手当金）", out[0])
+        self.assertIn("・もし家賃が払えなくなったら？", out[0])
+        self.assertEqual(out[0].count("病気"), 1)
+
+    def test_shortened_title_band_matches_nearest(self):
+        out = []
+        pipeline.report_titles({"title_band": "もし何も調べずに\n退職届を出したら？", "title_candidates": [
+            {"title": "もし何も調べずに退職届を出してしまったら？", "system": "退職給付金"},
+            {"title": "もし転職先が決まる前にお金が尽きたら？", "system": "退職給付金"}]}, out.append)
+        self.assertIn("🎯 タイトル: もし何も調べずに退職届を出してしまったら？（→ 退職給付金）", out[0])
+        self.assertEqual(out[0].count("調べずに"), 1)
+
+    def test_title_band_not_in_candidates(self):
+        out = []
+        pipeline.report_titles({"title_band": "もし貯金が尽きたら？",
+                                "title_candidates": [{"title": "もし家賃が払えなくなったら？"}]}, out.append)
+        self.assertIn("🎯 タイトル: もし貯金が尽きたら？", out[0])
+        self.assertIn("・もし家賃が払えなくなったら？", out[0])
+
+    def test_no_candidates_says_nothing(self):
+        out = []
+        pipeline.report_titles({}, out.append)
+        pipeline.report_titles({"title_candidates": "壊れた"}, out.append)
+        self.assertEqual(out, [])
+
+
 if __name__ == "__main__":
     main()

@@ -18,7 +18,8 @@ import unicodedata
 
 # ------------------------------------------------------------------ 固定の前提
 START_MONEY = 120                 # カウンター「手元のお金」の初期値（万円）。毎回同じ人の話にする
-ASSUMPTION = "貯金120万円・前の年の年収400万円・会社員を辞めた40代"   # LLMに渡す前提
+ASSUMPTION = ("貯金120万円・前の年の年収400万円の40代の会社員"          # LLMに渡す前提
+              "（話に合わせて、辞めた後・休職中・病気で休み始めた時など。起点は day_label で示す）")
 NOTE = "※数字はイメージです"       # カウンターが出ている間ずっと出す
 IDEAL_SUB = "※もしもの話です"      # もしもの世界の小字幕は固定
 REWIND_SAY = "でも現実は違います"
@@ -33,6 +34,7 @@ BANNED = [
     # 「毎朝ゆっくり起きられる」のような描写は弾かない。投稿の時間を告げる言い回しだけ
     (re.compile(r"毎朝.{0,12}(この時間|投稿|配信|お届け|更新)|お金の話は.{0,6}毎朝"), "中盤フォローの誘導"),
     (re.compile(r"必ずもらえ|絶対に?もらえ|誰でももらえ|100%"), "断定・誇大表現"),
+    (re.compile(r"知らないと損"), "煽り表現"),
 ]
 
 MAX_BIG, MAX_SUB, MAX_TITLE_LINE, MAX_PROP = 18, 22, 14, 10
@@ -136,9 +138,25 @@ PART_SHOTS = {
     "real": ["home_sofa", "home_letter", "home_worry", "home_sad", "home_desk"],
     "system": ["office_walk", "office_counter", "office_talk", "office_think"],
 }
-PART_ORDER = ["hook", "ideal", "real", "system"]
-PART_MIN = {"hook": 1, "ideal": 4, "real": 3, "system": 3}
-PART_MAX = {"hook": 1, "ideal": 7, "real": 6, "system": 6}
+
+# 動画の型は2つ。どちらかは segments の並び（ideal があるか）で見分ける。
+#   bad   … 悪いもしも（2026-11-19〜の本線・issue #30）:
+#           もし〇〇だったら？ → 悪い未来（お金が減っていく）→ 終盤で今の制度 → CTA
+#   ideal … 理想のもしも（2026-11-17〜18・本番_147/148）:
+#           もしもの世界 → でも現実は違います（巻き戻し）→ 現実 → 今の制度 → CTA
+#           作った回の手直しのために残す。新しくは作らない
+KINDS = {
+    "bad": {"order": ["hook", "real", "system"],
+            "min": {"hook": 1, "real": 4, "system": 3},
+            "max": {"hook": 1, "real": 8, "system": 6},
+            "badge": {"real": "もしも"}},
+    "ideal": {"order": ["hook", "ideal", "real", "system"],
+              "min": {"hook": 1, "ideal": 4, "real": 3, "system": 3},
+              "max": {"hook": 1, "ideal": 7, "real": 6, "system": 6},
+              "badge": {"ideal": "もしもの世界", "real": "現実"}},
+}
+DAY_LABEL = "退職してから"          # カウンターの見出し（「〇〇してから N日目」）
+MAX_DAY_LABEL = 8
 
 _CTA_CAMS = [([0.0, -6.5, 4.6], [0.0, -5.6, 4.3]), ([0.0, -5.6, 4.3], [0.0, -5.0, 4.0]),
              ([0.0, -5.0, 4.0], [0.0, -4.6, 3.8])]
@@ -156,12 +174,21 @@ DEFAULT_PROPS = {
 }
 
 
-def shot_guide() -> str:
+def shot_guide(kind: str = "bad") -> str:
     """プロンプトに載せる「選べる型」の一覧。"""
     out = []
-    for part in PART_ORDER:
+    for part in KINDS[kind]["order"]:
         out.append(f"- {part}: " + " / ".join(f"`{n}`（{SHOTS[n]['desc']}）" for n in PART_SHOTS[part]))
     return "\n".join(out)
+
+
+def kind_of(src: dict) -> str:
+    """LLMの台本JSON（か spec）がどちらの型か。ideal の区間があれば理想のもしも。"""
+    segs = src.get("segments")
+    for s in segs if isinstance(segs, list) else []:
+        if isinstance(s, dict) and str(s.get("part") or "").strip() == "ideal":
+            return "ideal"
+    return "bad"
 
 
 def _shot(name: str, mood: str) -> dict:
@@ -203,10 +230,11 @@ def _banned(text: str) -> str | None:
     return None
 
 
-def build_spec(src: dict, name: str) -> tuple[dict, list[str], list[str]]:
+def build_spec(src: dict, name: str, kind: str | None = None) -> tuple[dict, list[str], list[str]]:
     """LLMの台本JSON → make_3d.py 用 spec。(spec, エラー, 警告) を返す。
 
     エラーが1つでもあれば spec は使わないこと（呼び出し側がLLMに直させる）。
+    kind を渡すとその型として検査する（新しく作る回は "bad"。省くと並びから見分ける）。
     巻き戻し（でも現実は違います）と最後のCTA3行はここで足す。LLMには書かせない。
     """
     errors: list[str] = []
@@ -224,15 +252,20 @@ def build_spec(src: dict, name: str) -> tuple[dict, list[str], list[str]]:
     if not title.startswith("もし"):
         errors.append("title_band は「もし」で始めてください")
 
-    # パートの並び（hook → ideal → real → system）と本数
+    # パートの並び（bad: hook → real → system / ideal: hook → ideal → real → system）と本数
+    kind = kind or kind_of(src)
+    K = KINDS[kind]
     parts = [_clean(s.get("part")) for s in raw]
     order = [p for k, p in enumerate(parts) if k == 0 or parts[k - 1] != p]
-    if order != PART_ORDER:
-        errors.append(f"パートの並びは hook→ideal→real→system の1回ずつにしてください（今: {'→'.join(order)}）")
-    for p in PART_ORDER:
+    if order != K["order"]:
+        errors.append(f"パートの並びは {'→'.join(K['order'])} の1回ずつにしてください（今: {'→'.join(order)}）")
+    for p in K["order"]:
         n = parts.count(p)
-        if not PART_MIN[p] <= n <= PART_MAX[p]:
-            errors.append(f"{p} の区間は{PART_MIN[p]}〜{PART_MAX[p]}個にしてください（今{n}個）")
+        if not K["min"][p] <= n <= K["max"][p]:
+            errors.append(f"{p} の区間は{K['min'][p]}〜{K['max'][p]}個にしてください（今{n}個）")
+    day_label = _clean(src.get("day_label")) or DAY_LABEL
+    if len(day_label) > MAX_DAY_LABEL:
+        errors.append(f"day_label は{MAX_DAY_LABEL}字までにしてください（「〇〇してから」の形）: {day_label}")
 
     segs: list[dict] = []
     first_ideal: dict | None = None
@@ -276,7 +309,8 @@ def build_spec(src: dict, name: str) -> tuple[dict, list[str], list[str]]:
             seg.update({"grade": "normal", "badge": None, "day": None, "sub": IDEAL_SUB})
             if len(say) not in (2, 3):
                 errors.append(f"{where}: フックは2〜3行（1文）にしてください（今{len(say)}行）")
-            if not re.search(r"[0-9０-９]|[一二三四五六七八九十百千]+[歳年か月日割]", "".join(say) + title):
+            # 悪いもしもは「状況が目に浮かぶ」ことを優先する（数字は入れられる時だけ）ので警告しない
+            if kind == "ideal" and not re.search(r"[0-9０-９]|[一二三四五六七八九十百千]+[歳年か月日割]", "".join(say) + title):
                 warns.append("フック（タイトル帯か1行目）に年齢・期限・日数などの数字がありません")
         elif part in ("ideal", "real"):
             day, money = s.get("day"), s.get("money")
@@ -293,13 +327,13 @@ def build_spec(src: dict, name: str) -> tuple[dict, list[str], list[str]]:
                 errors.append(f"{where}: money が前の区間より増えています（{pm}→{money}）。"
                               f"手元のお金は{START_MONEY}万円から減るだけにしてください")
             last[part] = (day, money)
-            seg.update({"day": day, "money": money, "grade": part,
-                        "badge": "もしもの世界" if part == "ideal" else "現実"})
+            seg.update({"day": day, "money": money, "grade": part, "badge": K["badge"].get(part, "現実")})   # 型に無いパートは並びのエラーで止まる
             if part == "ideal":
                 seg["sub"] = IDEAL_SUB
                 first_ideal = first_ideal or seg
             elif not sub:
-                seg["sub"] = NOTE
+                # 悪いもしもは丸ごと仮の話なので「※もしもの話です」。理想のもしもの「現実」は数字の注意
+                seg["sub"] = IDEAL_SUB if kind == "bad" else NOTE
         else:   # system
             seg.update({"grade": "normal", "badge": "今の制度", "day": None})
         # 文の終わりにならない join は次の区間の頭と1文になる。最後の区間は必ず文を閉じる
@@ -325,14 +359,8 @@ def build_spec(src: dict, name: str) -> tuple[dict, list[str], list[str]]:
     if errors:
         return {}, errors, warns
 
-    # 巻き戻し（もしもの最後の画を逆再生して1日目へ戻す。3Dは書き出さない）
-    ideal_end = max(k for k, s in enumerate(segs) if s["part"] == "ideal")
-    rewind = _shot("home_wide", "any")
-    rewind["hero"] = {"act": "idle", "at": [-0.2, 1.6, 0], "rot": 0}
-    rewind.update({"say": [REWIND_SAY], "part": "rewind", "pad": 0.9, "rewind": True, "render": False,
-                   "grade": "rewind", "badge": "巻き戻し", "day": first_ideal["day"],
-                   "money": START_MONEY, "big": REWIND_BIG, "sub": ""})
-    segs.insert(ideal_end + 1, rewind)
+    if kind == "ideal":
+        _insert_rewind(segs, first_ideal)
 
     # CTA（固定3行・役所を引きで）
     for k, line in enumerate(CTA_SAY):
@@ -342,9 +370,21 @@ def build_spec(src: dict, name: str) -> tuple[dict, list[str], list[str]]:
                      "say": [line], "part": "cta", "grade": "normal", "badge": None, "day": None,
                      "big": line if k < 2 else "", "sub": "", **({"join": True} if k < 2 else {"cta": True})})
 
-    spec = {"name": name, "title": "\n".join(tl), "note": NOTE, "props": props,
-            "start_money": START_MONEY, "segments": segs}
+    spec = {"name": name, "kind": kind, "title": "\n".join(tl), "note": NOTE, "props": props,
+            "day_label": day_label, "start_money": START_MONEY, "segments": segs}
     return spec, [], warns
+
+
+def _insert_rewind(segs: list[dict], first_ideal: dict) -> None:
+    """理想のもしもだけ: もしもの最後の画を逆再生して1日目へ戻す（3Dは書き出さない）。"""
+    # 巻き戻し（もしもの最後の画を逆再生して1日目へ戻す。3Dは書き出さない）
+    ideal_end = max(k for k, s in enumerate(segs) if s["part"] == "ideal")
+    rewind = _shot("home_wide", "any")
+    rewind["hero"] = {"act": "idle", "at": [-0.2, 1.6, 0], "rot": 0}
+    rewind.update({"say": [REWIND_SAY], "part": "rewind", "pad": 0.9, "rewind": True, "render": False,
+                   "grade": "rewind", "badge": "巻き戻し", "day": first_ideal["day"],
+                   "money": START_MONEY, "big": REWIND_BIG, "sub": ""})
+    segs.insert(ideal_end + 1, rewind)
 
 
 # ------------------------------------------------------------------ 台本テキスト
