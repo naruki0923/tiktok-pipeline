@@ -83,6 +83,9 @@ ok=false のときは reason に理由だけ書き、他は空でよい。
 # 今週の重点方針（5_分析 の実測から自動更新）
 {focus}
 
+# 最近の3D動画で使ったタイトル（同じタイトル・ほぼ同じ言い換えは選ばない。同じ制度でも別の状況から入る）
+{recent}
+
 # タイトルの条件（これに沿ってタイトル案を出す）
 {title_rules}
 
@@ -109,7 +112,7 @@ ok=false のときは reason に理由だけ書き、他は空でよい。
 # 参考動画の文字起こし（誤変換を含む下書き。数字・同音異義語は文脈で直すこと）
 {transcript}
 
-# 出力の例（病気の回。形だけ真似る。内容は真似ない。事実は必ず上の文字起こしから）
+# 出力の例（病気の回。形だけ真似る。話題・制度名・制度の説明の言い回しは真似ない。事実は必ず上の文字起こしから）
 {example}
 
 # 出力形式（JSONのみ）
@@ -144,7 +147,7 @@ FIX_PROMPT = """次のもしも型台本JSONに直すべき点があります。
 
 # 直すべき点
 {errors}
-
+{kind_note}
 # もしも型ルール（抜粋ではなく全文）
 {rules}
 
@@ -161,7 +164,7 @@ REVISE_PROMPT = """次のもしも型台本JSONを、社長の指示どおりに
 
 # 社長の指示
 {instruction}
-
+{kind_note}
 # もしも型ルール
 {rules}
 
@@ -171,6 +174,19 @@ REVISE_PROMPT = """次のもしも型台本JSONを、社長の指示どおりに
 # 今のJSON
 {current}
 """
+
+
+# 理想のもしも（本番_147/148）を直す時だけ添える。ルールは悪いもしも型で書いてあるので、
+# そのまま渡すと LLM が並びを組み替えてしまい、ideal 型の検査で落ちる
+IDEAL_NOTE = """
+# この回の型（ルールより優先）
+この回は以前の「理想のもしも」型で作った回です。パートの並びは hook → ideal（もしもの世界）→ real（現実）→ system のまま変えないこと。
+下のルールの「型」「悪いもしも」の説明はこの回には当てはまりません（巻き戻しとCTAは自動で入る）。
+"""
+
+
+def kind_note(kind: str) -> str:
+    return IDEAL_NOTE if kind == "ideal" else ""
 
 
 # ------------------------------------------------------------------ 検査
@@ -260,7 +276,8 @@ def _fixer(rules: str, kind: str = "bad"):
     def fix(src: dict, errors: list[str]) -> dict | None:
         try:
             return llm.ask_json(FIX_PROMPT.format(
-                errors="\n".join(f"- {e}" for e in errors), rules=rules, shot_guide=shots.shot_guide(kind),
+                errors="\n".join(f"- {e}" for e in errors), kind_note=kind_note(kind),
+                rules=rules, shot_guide=shots.shot_guide(kind),
                 current=json.dumps(src, ensure_ascii=False, indent=1)), max_tokens=8000)
         except llm.LLMError as e:
             print(f"⚠ 直しの呼び出しに失敗: {e}", file=sys.stderr)
@@ -310,15 +327,51 @@ def save(name: str, src: dict, spec: dict, warns: list[str]) -> dict:
 
 
 def candidates(src: dict) -> list[dict]:
-    """タイトル案（LLMの形が崩れていても落ちない）。Discordに「他の案」として出す。"""
+    """タイトル案（LLMの形が崩れていても落ちない）。Discordに「他の案」として出す。
+
+    65歳系の案は出さない（選ばなかった案でも、社長が「その案で直して」と頼む入口になるため）。
+    """
     raw = src.get("title_candidates")
     out = []
     for c in raw if isinstance(raw, list) else []:
         if isinstance(c, dict) and str(c.get("title") or "").strip():
-            out.append({k: str(c.get(k) or "").strip() for k in ("title", "story", "system", "close")})
+            row = {k: str(c.get(k) or "").strip() for k in ("title", "story", "system", "close")}
         elif isinstance(c, str) and c.strip():
-            out.append({"title": c.strip(), "story": "", "system": "", "close": ""})
+            row = {"title": c.strip(), "story": "", "system": "", "close": ""}
+        else:
+            continue
+        if not off_target("\n".join(row.values())):
+            out.append(row)
     return out[:5]
+
+
+RECENT_TITLES = 20
+
+
+def recent_titles(limit: int = RECENT_TITLES, exclude: str | None = None) -> str:
+    """最近の3Dの回のタイトル帯（新しい順）。日をまたいで同じタイトルを選ばせないため。
+
+    実績.tsv は投稿して数字が付いた回の角度しか持たないので、公開前・未投稿の回はここで拾う。
+    spec は30日の自動削除の対象外（消えるのは mp4/wav/mp3 だけ）。
+    """
+    def num(p: Path) -> int:
+        m = re.search(r"_(\d+)\.3d\.json$", p.name)
+        return int(m.group(1)) if m else -1
+
+    out = []
+    for p in sorted(SCRIPT_TXT_DIR.glob("本番_*.3d.json"), key=num, reverse=True):
+        if exclude and p.name == f"{exclude}.3d.json":
+            continue
+        try:
+            title = str(json.loads(p.read_text(encoding="utf-8")).get("title") or "")
+        except (OSError, ValueError, AttributeError):
+            continue
+        title = re.sub(r"\s", "", title)
+        if title and title not in out:
+            out.append(title)
+        if len(out) >= limit:
+            break
+    return "\n".join(f"- {t}" for t in out) or "（まだ無し）"
 
 
 def title_rules() -> str:
@@ -366,7 +419,8 @@ def main() -> None:
         print(f"■ {name} を手直し / LLM経路: {llm.backend()}", file=sys.stderr)
         kind = shots.kind_of(current)        # 理想のもしもで作った回（147・148）は、その型のまま直す
         res = llm.ask_json(REVISE_PROMPT.format(
-            instruction=args.instruction, rules=rules, shot_guide=shots.shot_guide(kind),
+            instruction=args.instruction, kind_note=kind_note(kind), rules=rules,
+            shot_guide=shots.shot_guide(kind),
             current=json.dumps(current, ensure_ascii=False, indent=1)), max_tokens=8000)
         note = res.pop("note", "")
         try:
@@ -391,7 +445,8 @@ def main() -> None:
 
     prompt = PROMPT.format(
         today=f"{date.today():%Y年%m月%d日}", angles=ws.covered_angles(exclude_ref=ref),
-        focus=ws.focus_note(), title_rules=title_rules(), rules=rules, assumption=shots.ASSUMPTION,
+        focus=ws.focus_note(), recent=recent_titles(exclude=name), title_rules=title_rules(),
+        rules=rules, assumption=shots.ASSUMPTION,
         shot_guide=shots.shot_guide(), meta=args.meta, transcript=transcript[:8000],
         example=example_json())
     res = llm.ask_json(prompt, max_tokens=8000)

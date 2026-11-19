@@ -106,6 +106,33 @@ class KindTest(unittest.TestCase):
         self.assertIn("rewind", [s["part"] for s in spec["segments"]])
 
 
+class KindNoteTest(unittest.TestCase):
+    def test_ideal_revise_says_keep_order(self):
+        self.assertIn("hook → ideal", wm.kind_note("ideal"))
+        self.assertEqual(wm.kind_note("bad"), "")
+        for tmpl in (wm.FIX_PROMPT, wm.REVISE_PROMPT):
+            self.assertIn("{kind_note}", tmpl)
+
+
+class RecentTitlesTest(unittest.TestCase):
+    def test_newest_first_dedup_and_broken_files(self):
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            (d / "本番_9.3d.json").write_text(json.dumps({"title": "もし病気で\n働けなくなったら？"}), encoding="utf-8")
+            (d / "本番_10.3d.json").write_text(json.dumps({"title": "もし家賃が\n払えなくなったら？"}), encoding="utf-8")
+            (d / "本番_11.3d.json").write_text("{壊れた", encoding="utf-8")
+            (d / "本番_12.3d.json").write_text(json.dumps({"title": "もし病気で働けなくなったら？"}), encoding="utf-8")
+            (d / "本番_13.3d.json").write_text(json.dumps(["list"]), encoding="utf-8")
+            with patch.object(wm, "SCRIPT_TXT_DIR", d):
+                got = wm.recent_titles(exclude="本番_10")
+                self.assertEqual(got, "- もし病気で働けなくなったら？")
+                self.assertEqual(wm.recent_titles(limit=1).count("- "), 1)
+            with patch.object(wm, "SCRIPT_TXT_DIR", d / "無い"):
+                self.assertEqual(wm.recent_titles(), "（まだ無し）")
+
+
 class TitleTest(unittest.TestCase):
     def test_title_rules_are_the_conditions_only(self):
         text = wm.title_rules()
@@ -118,6 +145,12 @@ class TitleTest(unittest.TestCase):
         self.assertEqual([c["title"] for c in got], ["もし家賃が払えなくなったら？", "もし再就職先が見つからなかったら？"])
         self.assertEqual(got[0]["story"], "")
         self.assertEqual(wm.candidates({"title_candidates": "壊れた"}), [])
+
+    def test_off_target_candidates_are_dropped(self):
+        got = wm.candidates({"title_candidates": [
+            {"title": "もし65歳の誕生日前に辞めたら？", "system": "高年齢求職者給付金"},
+            {"title": "もし家賃が払えなくなったら？", "system": "住居確保給付金"}]})
+        self.assertEqual([c["title"] for c in got], ["もし家賃が払えなくなったら？"])
 
     def test_example_has_candidates(self):
         self.assertEqual(wm.candidates(src())[0]["title"], "もし病気で働けなくなったら？")

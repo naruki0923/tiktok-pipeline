@@ -155,10 +155,6 @@ KINDS = {
               "max": {"hook": 1, "ideal": 7, "real": 6, "system": 6},
               "badge": {"ideal": "もしもの世界", "real": "現実"}},
 }
-# 旧名（理想のもしも）。外から参照されている
-PART_ORDER = KINDS["ideal"]["order"]
-PART_MIN = KINDS["ideal"]["min"]
-PART_MAX = KINDS["ideal"]["max"]
 DAY_LABEL = "退職してから"          # カウンターの見出し（「〇〇してから N日目」）
 MAX_DAY_LABEL = 8
 

@@ -265,7 +265,7 @@ def overlay(t, segs, spec, i):
             money = round(m0 + (m1 - m0) * k)
             real = seg.get("grade") == "real"   # 赤字・減った額の表示は「現実」の時だけ
             col = (255, 70, 60) if real and m1 < spec.get("start_money", 120) else (255, 255, 255)
-        stext(d, (x0, y0), spec.get("day_label") or "退職してから", font(W6, 36), sw=6)
+        stext(d, (x0, y0), _mask_money(spec.get("day_label") or "退職してから"), font(W6, 36), sw=6)
         stext(d, (x0, y0 + 46), f"{day}", font(W8, 120), sw=9)
         nw = font(W8, 120).getlength(f"{day}")
         stext(d, (x0 + nw + 10, y0 + 104), "日目", font(W8, 52), sw=7)

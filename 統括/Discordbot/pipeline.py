@@ -14,6 +14,7 @@
 """
 from __future__ import annotations
 
+import difflib
 import json
 import os
 import re
@@ -179,11 +180,25 @@ def make(name: str, log: Log, verb: str = "動画生成中") -> tuple[bool, str]
 
 
 def report_titles(res: dict, log: Log) -> None:
-    """もしも型で選んだタイトルと、選ばなかった案（気に入った案があれば「直して」で差し替えられる）。"""
+    """もしも型で選んだタイトルと、選ばなかった案（気に入った案があれば「直して」で差し替えられる）。
+
+    選んだのは動画に使われた title_band（LLMが案を選んだ順に並べるとは限らないので、案の先頭は使わない）。
+    """
+    def key(t: str) -> str:
+        return re.sub(r"\s", "", t or "")
+
     cands = [c for c in res.get("title_candidates") or [] if isinstance(c, dict) and c.get("title")]
-    if not cands:
+    chosen = key(res.get("title_band") or "")
+    if not cands or not chosen:
         return
-    head, rest = cands[0], cands[1:]
+    # title_band は1行14字に収めるため案の文言を縮めることがある。完全一致が無ければ、いちばん近い案
+    # （似ている度合い0.6以上）を選んだ案とみなす。それも無ければ title_band をそのまま出す
+    head = next((c for c in cands if key(c["title"]) == chosen), None)
+    if head is None:
+        score, best = max(((difflib.SequenceMatcher(None, key(c["title"]), chosen).ratio(), c)
+                           for c in cands), key=lambda x: x[0])
+        head = best if score >= 0.6 else {"title": chosen}
+    rest = [c for c in cands if c is not head]
     lines = [f"🎯 タイトル: {head['title']}" + (f"（→ {head['system']}）" if head.get("system") else "")]
     if rest:
         lines.append("ほかの案:")
