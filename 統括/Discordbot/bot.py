@@ -261,13 +261,21 @@ def post_view(name: str) -> discord.ui.View:
 def mention() -> str:
     """名指し用の `<@id> `。相手が分からなければ空文字（＝ただの通知）。
 
-    動画が出来て**あとは投稿だけ**の状態はスマホに気づいてほしいので、
-    そこだけ名指しする。相手は .env（DISCORD_MENTION_USER_ID か
-    DISCORD_ALLOWED_USER_ID）が優先で、無ければ最初に話しかけてきた人を
-    state.json に覚えて使うので、設定しなくても2回目以降は効く。
+    **社長が何かしないと先へ進まない時**（完成して投稿の合図待ち・手動投稿・
+    【許可】や【投稿予約する】を押す・失敗してやり直しの合図待ち・判断待ち）は
+    スマホに気づいてほしいので名指しする（2026-11-22・issue #32）。
+    進捗や、言われたことへのその場の返事では鳴らさない。
+    相手は .env（DISCORD_MENTION_USER_ID か DISCORD_ALLOWED_USER_ID）が優先で、
+    無ければ最初に話しかけてきた人を state.json に覚えて使うので、
+    設定しなくても2回目以降は効く。
     """
     uid = config.MENTION_USER_ID or runner.load_state().get("owner_id", 0)
     return f"<@{int(uid)}> " if uid else ""
+
+
+def needs_owner(text: str) -> str:
+    """社長の操作待ちのメッセージ。先頭に名指しを付ける。"""
+    return f"{mention()}{text}"
 
 
 async def learn_owner() -> None:
@@ -624,7 +632,7 @@ async def do_make(ch: discord.abc.Messageable, mode: str, arg: str = "",
         # これは人がやること（素材を戻す／許可を押す）なので作り直しはしない。
         problem = await asyncio.to_thread(runner.bg_dir_problem)
         if problem:
-            await send(th, problem)
+            await send(th, needs_owner(problem))     # 許可を押す／素材を戻すのは社長
             return
         for attempt in range(config.AUTO_RETRY_MAX + 1):
             res, context, detail = await make_once(th, mode, arg, log)
@@ -634,8 +642,8 @@ async def do_make(ch: discord.abc.Messageable, mode: str, arg: str = "",
                 return                       # 人がやることがある失敗。作り直さない
             _, changed = await ask_codex(th, context, detail)
             if attempt >= config.AUTO_RETRY_MAX:
-                await th.send(f"🛑 {attempt + 1}回試したのでいったん止めます。"
-                              "直っていそうなら `作って` でもう一度動かしてね")
+                await th.send(needs_owner(f"🛑 {attempt + 1}回試したのでいったん止めます。"
+                                          "直っていそうなら `作って` でもう一度動かしてね"))
                 return
             # 台本まで出来ていたら、作り直しはその台本から（リサーチ・台本づくりをやり直さない）
             if (name := retry_target(context)) and runner.script_txt(name).exists():
@@ -691,7 +699,7 @@ async def _do_post_inner(ch: discord.abc.Messageable, name: str, where: str, slo
     async with _busy:
         # 予約時刻は媒体で違う（TikTok 8:30 / YouTube 6:30）ので、それぞれの時刻で言う
         tk_when, yt_when = runner.slot_label(slot, "tiktok"), runner.slot_label(slot, "youtube")
-        out, needs_hand, errors = [], False, []
+        out, needs_hand, errors, ylog = [], False, [], ""
 
         # TikTokは既定で手動投稿（2026-09-09 社長判断）。Botはブラウザを触らず、
         # 貼る文だけ渡す。ブラウザ自動化を使うのは `おまかせ投稿`（auto=True）の時だけ。
@@ -714,6 +722,7 @@ async def _do_post_inner(ch: discord.abc.Messageable, name: str, where: str, slo
 
         if where in ("youtube", "both"):
             ok, log = await asyncio.to_thread(runner.post_youtube, name, slot)
+            ylog = log
             dup = runner.youtube_already(log) if ok else None
             if dup is not None:
                 out.append(f"⏭ YouTube: この回は上げ済みなので二重には上げません {dup}".rstrip())
@@ -743,7 +752,13 @@ async def _do_post_inner(ch: discord.abc.Messageable, name: str, where: str, slo
                        f"になっているか目視確認してね")
         if needs_hand:
             out.append("※ Macの前に居られない時は `おまかせ投稿` と送れば確定まで自動で押します")
-        await send(ch, "\n".join(out))
+        # 手で投稿する・ボタンを押す・失敗をやり直す・YouTubeを差し替える、のどれかが
+        # 残る時は名指しする。全部自動で済んだ時だけ鳴らさない。YouTubeのアップロードは
+        # 数分かかるので、`投稿` と打った後に画面を離れていても気づけるように。
+        waiting = (needs_hand or tiktok_manual or bool(errors)
+                   or runner.YT_REBUILT_MARK in ylog)
+        text = "\n".join(out)
+        await send(ch, needs_owner(text) if waiting else text)
 
         # 投稿文は**単独のメッセージ**でコードブロックに入れる。まわりの説明が
         # 一緒にコピーされないようにするため（コピーボタン／長押しでそのまま取れる）。
@@ -776,7 +791,7 @@ async def do_post(ch: discord.abc.Messageable, name: str, where: str, slot: str,
         await _do_post_inner(ch, name, where, slot, auto)
     except Exception:  # noqa: BLE001
         detail = traceback.format_exc()
-        await send(ch, f"❌ 投稿処理で想定外のエラー\n```\n{detail[-1200:]}\n```")
+        await send(ch, needs_owner(f"❌ 投稿処理で想定外のエラー\n```\n{detail[-1200:]}\n```"))
         await ask_codex(ch, f"{name} の投稿処理（{where}）の想定外エラー", detail)
 
 
@@ -819,11 +834,11 @@ async def do_weekly(ch: discord.abc.Messageable, headline: str = "", covers: str
             ok, res, log = await asyncio.to_thread(runner.weekly_review)
         except Exception:  # noqa: BLE001 - 週次が落ちても静かに死なせない
             detail = traceback.format_exc()
-            await send(th, f"❌ 週次レビューで想定外のエラー\n```\n{detail[-1200:]}\n```")
+            await send(th, needs_owner(f"❌ 週次レビューで想定外のエラー\n```\n{detail[-1200:]}\n```"))
             await ask_codex(th, "週次レビュー（5_分析/scripts/weekly_review.py）", detail)
             return
         if not ok:
-            await send(th, f"❌ 週次レビューに失敗\n```\n{log[-1200:]}\n```")
+            await send(th, needs_owner(f"❌ 週次レビューに失敗\n```\n{log[-1200:]}\n```"))
             await ask_codex(th, "週次レビュー（5_分析/scripts/weekly_review.py）", log)
             return
         # 成功した回のCSVだけ「消費済み」にする。失敗・例外・_busy で走らなかった時は残さず、
@@ -842,11 +857,14 @@ async def do_weekly(ch: discord.abc.Messageable, headline: str = "", covers: str
         if res.get("proposal"):
             body += ["", f"💡 ネタ提案の下書き: `{Path(res['proposal']).name}`"
                          "（採用/却下は社長。使う時は `作って` の前に見てね）"]
-        await send(th, "\n".join(body))
+        # 判断待ち・ネタ提案の採否は社長が決めるので、その時だけ名指しする
+        text = "\n".join(body)
+        await send(th, needs_owner(text) if res.get("notes") or res.get("proposal") else text)
 
         for key in ("report", "proposal"):
+            # 空（提案が無い週）だと Path("") が "." になり、フォルダを添付しようとして落ちる
             path = Path(res.get(key) or "")
-            if path.exists() and path.stat().st_size < 7_000_000:
+            if res.get(key) and path.is_file() and path.stat().st_size < 7_000_000:
                 try:
                     await th.send(file=discord.File(str(path)))
                 except discord.HTTPException as e:
@@ -916,15 +934,10 @@ async def weekly_tick(now: datetime) -> bool:
 
 
 def csv_nudge(w: dict, due: datetime) -> str:
-    mention = f"<@{_owner_id()}> " if _owner_id() else ""
-    return (f"{mention}📥 **今週の Content.csv がまだ届いていません**（{due:%m/%d} {w['time']} 週次レビュー）\n"
+    return needs_owner(f"📥 **今週の Content.csv がまだ届いていません**（{due:%m/%d} {w['time']} 週次レビュー）\n"
             "TikTok Studio → アナリティクス → **コンテンツ** → 期間を**「過去7日」と「過去60日」**にして"
             "それぞれ「データをダウンロード」→ 2つともこのチャンネルに投げてください。"
             "届いたらそのまま分析を始めます（1つ目が届いた時点で始めるので、**2つ一緒に**投げてね）")
-
-
-def _owner_id() -> int:
-    return int(config.MENTION_USER_ID or runner.load_state().get("owner_id", 0) or 0)
 
 
 async def take_csv(msg: discord.Message) -> bool:
@@ -1100,7 +1113,7 @@ async def _clock_error(error: BaseException) -> None:
     ch = _channel()
     if ch:
         try:
-            await send(ch, f"❌ 定時実行で想定外のエラー\n```\n{detail[-1200:]}\n```")
+            await send(ch, needs_owner(f"❌ 定時実行で想定外のエラー\n```\n{detail[-1200:]}\n```"))
         except discord.HTTPException as e:
             print(f"[clock] Discordへエラーを送れません: {e}")
             ch = None
@@ -1116,7 +1129,7 @@ async def on_error(event_method: str, *args, **kwargs) -> None:
     ch = getattr(args[0], "channel", None) if args else None
     if ch:
         try:
-            await send(ch, f"❌ {event_method} で想定外のエラー\n```\n{detail[-1200:]}\n```")
+            await send(ch, needs_owner(f"❌ {event_method} で想定外のエラー\n```\n{detail[-1200:]}\n```"))
         except discord.HTTPException as e:
             print(f"[on_error] Discordへエラーを送れません: {e}")
             ch = None
